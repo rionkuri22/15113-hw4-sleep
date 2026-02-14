@@ -3,45 +3,37 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Track sleep</title>
+    <title>Sleep Journey Pro</title>
     <style>
         :root {
             --day-gradient: linear-gradient(180deg, #FFB347 0%, #FFCC33 100%);
             --night-gradient: radial-gradient(circle at top right, #283593, #121212);
         }
-        body { margin: 0; height: 100vh; display: flex; align-items: center; justify-content: center; font-family: 'Inter', sans-serif; transition: background 1.2s; overflow: hidden; }
+        body { margin: 0; height: 100vh; display: flex; align-items: center; justify-content: center; font-family: 'Inter', sans-serif; transition: background 1.2s cubic-bezier(0.4, 0, 0.2, 1); overflow: hidden; }
         body.mode-wake { background: var(--day-gradient); color: #4e342e; }
         body.mode-sleep { background: var(--night-gradient); color: white; }
         
-        /* Updated: Card now takes up roughly 50% of the screen height */
         .glass-card { 
             background: rgba(255, 255, 255, 0.15); 
-            backdrop-filter: blur(25px); 
-            -webkit-backdrop-filter: blur(25px); 
+            backdrop-filter: blur(25px); -webkit-backdrop-filter: blur(25px); 
             border: 1px solid rgba(255, 255, 255, 0.2); 
-            padding: 40px; 
-            border-radius: 40px; 
-            width: 85%; 
-            max-width: 450px; 
-            min-height: 50vh; 
+            padding: 40px; border-radius: 40px; 
+            width: 85%; max-width: 450px; min-height: 50vh; 
             box-shadow: 0 20px 50px rgba(0,0,0,0.3); 
-            position: relative; 
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
+            position: relative; display: flex; flex-direction: column; justify-content: center;
         }
         
         .nav-btn { position: absolute; top: 25px; right: 25px; background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.3); color: inherit; padding: 8px 18px; font-size: 0.8rem; border-radius: 12px; cursor: pointer; }
-        
         h1 { font-size: 2.2rem; margin-bottom: 5px; }
         #live-date { font-size: 1.1rem; opacity: 0.9; margin-bottom: 30px; font-weight: 500; }
         
-        button.btn-main { width: 100%; padding: 25px; font-size: 1.4rem; font-weight: 700; border: none; border-radius: 50px; cursor: pointer; transition: 0.2s; box-shadow: 0 10px 20px rgba(0,0,0,0.1); }
+        button.btn-main { width: 100%; padding: 25px; font-size: 1.4rem; font-weight: 700; border: none; border-radius: 50px; cursor: pointer; transition: 0.2s; }
         .mode-sleep .btn-main { background: #1a237e; color: white; }
         .mode-wake .btn-main { background: white; color: #f57c00; }
         
         .override-section { margin-top: 30px; font-size: 0.9rem; }
         input[type=range] { width: 100%; margin-top: 10px; }
+        #status { margin-top: 15px; font-size: 0.7rem; opacity: 0.6; }
         
         #history-view { display: none; text-align: left; }
         .history-item { border-bottom: 1px solid rgba(255,255,255,0.1); padding: 15px 0; display: flex; justify-content: space-between; align-items: center; }
@@ -54,44 +46,71 @@
         
         <div id="main-view">
             <h1>Hello, Rion</h1>
-            <div id="live-date">Loading date...</div>
-            
-            <button id="action-btn" class="btn-main" onclick="sendLog()">Action</button>
-            
+            <div id="live-date">...</div>
+            <button id="action-btn" class="btn-main" onclick="sendLog()">...</button>
             <div class="override-section">
                 <label>Forgot? <span id="offset-val">0</span> mins ago</label>
                 <input type="range" id="time-offset" min="0" max="120" value="0" oninput="document.getElementById('offset-val').innerText = this.value">
             </div>
+            <div id="status">Syncing...</div>
         </div>
 
         <div id="history-view">
-            <h2 style="margin-top:0">Sleep History</h2>
+            <h2 style="margin:0 0 20px 0">Sleep History</h2>
             <div id="history-list">Analyzing logs...</div>
         </div>
     </div>
 
     <script>
         let currentState = 'wake';
-        
-        // Update Live Date on Front Page
+        const actionBtn = document.getElementById('action-btn');
+
         function updateDate() {
             const now = new Date();
             const options = { weekday: 'long', month: 'short', day: 'numeric' };
             document.getElementById('live-date').innerText = now.toLocaleDateString('en-US', options);
         }
-        setInterval(updateDate, 60000);
-        updateDate();
 
         function toggleView() {
             const main = document.getElementById('main-view');
             const hist = document.getElementById('history-view');
             if (main.style.display === 'none') {
-                main.style.display = 'block';
-                hist.style.display = 'none';
+                main.style.display = 'block'; hist.style.display = 'none';
             } else {
-                main.style.display = 'none';
-                hist.style.display = 'block';
+                main.style.display = 'none'; hist.style.display = 'block';
                 loadHistory();
+            }
+        }
+
+        function updateUI(lastEvent) {
+            currentState = lastEvent;
+            if (lastEvent === 'sleep') {
+                document.body.className = 'mode-wake';
+                actionBtn.innerText = "☀️ Rise & Shine";
+            } else {
+                document.body.className = 'mode-sleep';
+                actionBtn.innerText = "🌙 Clocking Out";
+            }
+        }
+
+        async function sendLog() {
+            const offset = document.getElementById('time-offset').value;
+            const nextType = currentState === 'sleep' ? 'wake' : 'sleep';
+            const previousState = currentState;
+
+            // Optimistic UI Update
+            updateUI(nextType);
+            document.getElementById('status').innerText = "Updating Singapore...";
+
+            try {
+                const res = await fetch(`/api/log?event_type=${nextType}&offset_minutes=${offset}`, { method: 'POST' });
+                if (!res.ok) throw new Error();
+                document.getElementById('status').innerText = "Logged!";
+                document.getElementById('time-offset').value = 0;
+                document.getElementById('offset-val').innerText = 0;
+            } catch (err) {
+                updateUI(previousState); // Revert on error
+                document.getElementById('status').innerText = "Failed to Sync.";
             }
         }
 
@@ -100,50 +119,39 @@
             const data = await res.json();
             const list = document.getElementById('history-list');
             list.innerHTML = '';
-            
-            // Logic to pair Sleep -> Wake and calculate hours
+            const dailyTotals = {};
+
             for (let i = 0; i < data.length - 1; i++) {
                 if (data[i].type === 'wake' && data[i+1].type === 'sleep') {
                     const wake = new Date(data[i].time);
                     const sleep = new Date(data[i+1].time);
                     const diffHrs = (wake - sleep) / (1000 * 60 * 60);
-                    
-                    if (diffHrs > 0.01) { // Ignore clicks within ~30 seconds
-                        const item = document.createElement('div');
-                        item.className = 'history-item';
-                        item.innerHTML = `
-                            <span>${wake.toLocaleDateString('en-US', {month:'short', day:'numeric'})}</span>
-                            <span class="history-hours">${diffHrs.toFixed(1)} hrs</span>
-                        `;
-                        list.appendChild(item);
+                    if (diffHrs > 0.05) {
+                        const dateKey = wake.toLocaleDateString('en-US', {month:'short', day:'numeric'});
+                        dailyTotals[dateKey] = (dailyTotals[dateKey] || 0) + diffHrs;
                     }
                 }
             }
-        }
 
-        // Standard State/UI Logic
-        function updateUI(lastEvent) {
-            currentState = lastEvent;
-            if (lastEvent === 'sleep') {
-                document.body.className = 'mode-wake';
-                document.getElementById('action-btn').innerText = "☀️ Rise & Shine";
-            } else {
-                document.body.className = 'mode-sleep';
-                document.getElementById('action-btn').innerText = "🌙 Clocking Out";
+            for (const [date, total] of Object.entries(dailyTotals)) {
+                const item = document.createElement('div');
+                item.className = 'history-item';
+                item.innerHTML = `<span>${date}</span><span class="history-hours">${total.toFixed(1)} hrs</span>`;
+                list.appendChild(item);
             }
         }
 
-        async function sendLog() {
-            const offset = document.getElementById('time-offset').value;
-            const type = currentState === 'sleep' ? 'wake' : 'sleep';
-            await fetch(`/api/log?event_type=${type}&offset_minutes=${offset}`, { method: 'POST' });
-            location.reload(); // Refresh to update state and clear slider
-        }
-
         window.onload = async () => {
-            const res = await fetch('/api/state');
-            const data = await res.json();
-            updateUI(data.last_event);
+            updateDate();
+            try {
+                const res = await fetch('/api/state');
+                const data = await res.json();
+                updateUI(data.last_event);
+                document.getElementById('status').innerText = "Ready";
+            } catch (err) {
+                updateUI('wake');
+                document.getElementById('status').innerText = "Offline";
+            }
         };
     </script>
 </body>
