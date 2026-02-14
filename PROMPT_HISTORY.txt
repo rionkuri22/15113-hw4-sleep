@@ -4,3 +4,13 @@ Help me plan for features, relevant APIs etc. for this website idea I have. As a
 There are sleep apps but the built in app/feature on the health app somehow keeps on messing up the times because it works off sensors and my alarms or sth. Other apps record my sleep adn are not about sleep quality which is something I do not have trouble with and do not want to waste my battery or storage on.
 Ideally I want users like myself to be able to login and even see interactive visual repesentations etc of their sleep data 
 
+You said
+Nice it worked. Now make these changes to the index.py code.
+Make it so that the whole page goes dark when not night time but when last button pressed is "good morning" and the opposite for when last button pressed is "good night". Also make the background not just a dark or bright color but something more aesthetic along the lines of the inspiritioatn images attached.
+Change the "good morning" and "good night" text to something a little more fun.
+
+Change button text to "rise and shine" and "clocking out"
+Make it so that there is only 1 button at a time on the screen.
+So if "clocking out" was last pushed, the site should only show the "rise and shine" button.
+
+Change so that the text above the button is always "Hello, Rion"
