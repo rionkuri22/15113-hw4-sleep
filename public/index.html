@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sleep Journey</title>
+    <style>
+        :root {
+            --day-accent: #FFB347;
+            --day-gradient: linear-gradient(180deg, #FFB347 0%, #FFCC33 100%);
+            
+            --night-accent: #1a237e;
+            --night-gradient: radial-gradient(circle at top right, #283593, #121212);
+        }
+
+        body { 
+            margin: 0;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            transition: background 1.2s cubic-bezier(0.4, 0, 0.2, 1);
+            text-align: center;
+        }
+
+        /* The theme colors are still triggered by the last event */
+        body.mode-wake { background: var(--day-gradient); color: #4e342e; }
+        body.mode-sleep { background: var(--night-gradient); color: #ffffff; }
+
+        .glass-card {
+            background: rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(25px);
+            -webkit-backdrop-filter: blur(25px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            padding: 60px 30px;
+            border-radius: 40px;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.2);
+            width: 85%;
+            max-width: 360px;
+        }
+
+        h1 { font-size: 2.2rem; margin-bottom: 30px; font-weight: 800; }
+
+        button {
+            width: 100%;
+            padding: 24px;
+            font-size: 1.4rem;
+            font-weight: 700;
+            border: none;
+            border-radius: 50px;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            display: none; 
+        }
+
+        .btn-sleep { background: var(--night-accent); color: white; box-shadow: 0 10px 30px rgba(0,0,0,0.3); }
+        .btn-wake { background: #ffffff; color: #f57c00; box-shadow: 0 10px 30px rgba(0,0,0,0.1); }
+
+        button:active { transform: scale(0.95); }
+        #status { margin-top: 30px; font-size: 0.8rem; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; opacity: 0.7; }
+    </style>
+</head>
+<body class="mode-sleep">
+    <div class="glass-card">
+        <h1>Hello Rion!</h1>
+        
+        <button id="sleep-btn" class="btn-sleep" onclick="sendLog('sleep')">🌙 Clocking Out</button>
+        <button id="wake-btn" class="btn-wake" onclick="sendLog('wake')">☀️ Rise & Shine</button>
+        
+        <div id="status">Syncing...</div>
+    </div>
+
+    <script>
+        const body = document.body;
+        const statusDiv = document.getElementById('status');
+        const sleepBtn = document.getElementById('sleep-btn');
+        const wakeBtn = document.getElementById('wake-btn');
+
+        function updateUI(lastEvent) {
+            // Logic: Show the button for the NEXT action
+            if (lastEvent === 'sleep') {
+                body.className = 'mode-wake';
+                sleepBtn.style.display = 'none';
+                wakeBtn.style.display = 'block';
+            } else {
+                body.className = 'mode-sleep';
+                sleepBtn.style.display = 'block';
+                wakeBtn.style.display = 'none';
+            }
+        }
+
+        window.onload = async () => {
+            try {
+                // Fetch state from the Python API
+                const res = await fetch('/api/state');
+                const data = await res.json();
+                updateUI(data.last_event);
+                statusDiv.innerText = "System Ready";
+            } catch (err) {
+                updateUI('wake');
+                statusDiv.innerText = "Offline Mode";
+            }
+        };
+
+        async function sendLog(type) {
+            statusDiv.innerText = "Saving...";
+            try {
+                // Log event to the Neon database via FastAPI
+                const res = await fetch(`/api/log?event_type=${type}`, { method: 'POST' });
+                if (res.ok) {
+                    updateUI(type);
+                    statusDiv.innerText = "Success";
+                }
+            } catch (err) {
+                statusDiv.innerText = "Save Failed";
+            }
+        }
+    </script>
+</body>
+</html>

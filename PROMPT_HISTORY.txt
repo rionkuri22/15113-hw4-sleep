@@ -1,0 +1,6 @@
+Model: Gemini
+
+Help me plan for features, relevant APIs etc. for this website idea I have. As a person that does not have a set sleep schedule and sleeps at weird times 5AM to 12PM for example one day but 1 to 4AM another that also does not have any kind of wearable like a watch or ring, I want a website where I can just click on a "good night" or "good morning" button type thing to show when I woke up and slept.
+There are sleep apps but the built in app/feature on the health app somehow keeps on messing up the times because it works off sensors and my alarms or sth. Other apps record my sleep adn are not about sleep quality which is something I do not have trouble with and do not want to waste my battery or storage on.
+Ideally I want users like myself to be able to login and even see interactive visual repesentations etc of their sleep data 
+
