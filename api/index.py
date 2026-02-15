@@ -44,23 +44,23 @@ def get_history():
 async def log_event(event_type: str, offset_minutes: int = 0):
     try:
         now_utc = datetime.now(timezone.utc)
-        # Calculate the actual time (applying the 'Forgot' slider)
+        # 1. Calculate the actual time (applying the 'Forgot' slider)
         actual_time = now_utc - timedelta(minutes=int(offset_minutes))
         
         conn = get_db_connection()
         cur = conn.cursor()
         
-        # ALWAYS INSERT. Never update. This ensures every nap is a separate row.
+        # 2. ALWAYS INSERT. This guarantees every single click is recorded.
         cur.execute(
             "INSERT INTO sleep_events (event_type, created_at) VALUES (%s, %s)",
             (event_type, actual_time)
         )
         conn.commit()
 
-        # Calculate duration immediately on the server for accuracy
+        # 3. Calculate duration immediately
         duration_hours = None
         if event_type == "wake":
-            # Find the sleep that happened just before this wake
+            # Find the most recent sleep that happened strictly BEFORE this wake time
             cur.execute("""
                 SELECT created_at FROM sleep_events 
                 WHERE event_type = 'sleep' AND created_at < %s 
@@ -72,6 +72,8 @@ async def log_event(event_type: str, offset_minutes: int = 0):
                 sleep_time = last_sleep[0]
                 if sleep_time.tzinfo is None:
                     sleep_time = sleep_time.replace(tzinfo=timezone.utc)
+                
+                # Calculate difference in seconds
                 diff_seconds = (actual_time - sleep_time).total_seconds()
                 duration_hours = diff_seconds / 3600.0
 
