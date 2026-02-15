@@ -28,7 +28,6 @@
         #live-date { font-size: 1.1rem; opacity: 0.9; margin-bottom: 10px; font-weight: 500; }
         
         #duration-feedback { font-size: 1.6rem; font-weight: 800; margin-bottom: 20px; min-height: 1.6rem; color: #1a237e; display: none; }
-        /* Only show feedback when explicitly told to, or in specific states if needed */
         
         button.btn-main { width: 100%; padding: 25px; font-size: 1.4rem; font-weight: 700; border: none; border-radius: 50px; cursor: pointer; transition: 0.2s; }
         .mode-sleep .btn-main { background: #1a237e; color: white; }
@@ -41,10 +40,7 @@
         #history-view { display: none; text-align: left; max-height: 40vh; overflow-y: auto; }
         .history-item { border-bottom: 1px solid rgba(255,255,255,0.1); padding: 15px 0; display: flex; justify-content: space-between; align-items: center; }
         .history-hours { font-weight: 800; font-size: 1.2rem; min-width: 80px; text-align: right; }
-
-        .reset-btn { width: 100%; background: rgba(255, 59, 48, 0.2); border: 1px solid rgba(255, 59, 48, 0.5); color: inherit; padding: 12px; border-radius: 15px; margin-top: 20px; cursor: pointer; font-weight: 600; font-size: 0.8rem; }
         
-        /* Helper to show text where button was */
         .feedback-mode #action-btn { display: none; }
         .feedback-mode #duration-feedback { display: block; margin-top: 20px; }
     </style>
@@ -69,7 +65,6 @@
         <div id="history-view">
             <h2 style="margin:0 0 10px 0">Sleep History</h2>
             <div id="history-list">Loading...</div>
-            <button class="reset-btn" onclick="resetData()">🗑️ Reset All Data</button>
         </div>
     </div>
 
@@ -106,16 +101,16 @@
 
         function updateUI(lastEvent) {
             currentState = lastEvent;
-            // Remove the temporary "feedback mode" class if it exists
             mainView.classList.remove('feedback-mode');
             
+            // Clear status text so "Tap screen to continue" doesn't linger
+            statusDiv.innerText = "";
+
             if (lastEvent === 'sleep') {
-                // Currently sleeping -> Show Day Theme (Rise & Shine)
                 document.body.className = 'mode-wake';
                 actionBtn.innerText = "☀️ Rise & Shine";
                 actionBtn.style.display = 'block';
             } else {
-                // Currently awake -> Show Night Theme (Clocking Out)
                 document.body.className = 'mode-sleep';
                 actionBtn.innerText = "🌙 Clocking Out";
                 actionBtn.style.display = 'block';
@@ -139,8 +134,7 @@
                 statusDiv.innerText = "Saved!";
 
                 if (nextType === 'wake') {
-                    // --- SPECIAL LOGIC FOR WAKING UP ---
-                    // 1. Hide Button, Show Text
+                    // Enter "Feedback Mode"
                     mainView.classList.add('feedback-mode');
                     if (data.duration !== null) {
                         feedbackDiv.innerText = `You slept for ${formatDuration(data.duration)}`;
@@ -150,21 +144,19 @@
                     feedbackDiv.style.display = 'block';
                     actionBtn.style.display = 'none';
 
-                    // 2. Wait for user to click anywhere to continue
+                    // Special status text only for this screen
                     statusDiv.innerText = "Tap screen to continue";
                     
                     const proceedToNextState = () => {
-                        updateUI(nextType); // This finally flips to 'Clocking Out'
+                        updateUI(nextType); 
                         document.body.removeEventListener('click', proceedToNextState);
                     };
                     
-                    // Small timeout to prevent the current click from triggering it immediately
                     setTimeout(() => {
                         document.body.addEventListener('click', proceedToNextState);
                     }, 200);
 
                 } else {
-                    // Normal behavior for going to sleep (immediate switch)
                     updateUI(nextType);
                 }
 
@@ -173,21 +165,10 @@
 
             } catch (err) {
                 statusDiv.innerText = "Error: " + err.message;
-                // If error, revert UI safely
                 updateUI(currentState);
             } finally {
                 actionBtn.disabled = false;
             }
-        }
-
-        async function resetData() {
-            if(!confirm("Are you sure? This deletes ALL history.")) return;
-            try {
-                await fetch('/api/reset', { method: 'DELETE' });
-                await loadHistory();
-                updateUI('wake'); 
-                statusDiv.innerText = "Data wiped.";
-            } catch(e) { alert("Reset failed"); }
         }
 
         async function loadHistory() {
@@ -202,11 +183,13 @@
 
             for (let ev of events) {
                 if (ev.type === 'sleep') {
+                    // Logic: Always take the FIRST sleep event if we have overlaps
                     if (currentSleepStart === null) currentSleepStart = ev.timestamp;
                 } else if (ev.type === 'wake') {
                     if (currentSleepStart !== null) {
                         const diff = (ev.timestamp - currentSleepStart) / 3600;
-                        if (diff > 0.02) { 
+                        // Removed filter so even 1-minute tests show up
+                        if (diff > 0.00) { 
                             sessions.push({ start: currentSleepStart, end: ev.timestamp, duration: diff });
                         }
                         currentSleepStart = null;
@@ -245,7 +228,6 @@
                 const res = await fetch('/api/state');
                 const data = await res.json();
                 updateUI(data.last_event);
-                statusDiv.innerText = "Ready";
             } catch (err) {
                 updateUI('wake');
                 statusDiv.innerText = "Offline";

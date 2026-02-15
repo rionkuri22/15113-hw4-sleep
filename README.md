@@ -1,10 +1,12 @@
 ### About the product
-A sleep-tracking web application designed specifically for individuals with irregular sleep schedules. This tool moves away from traditional "calendar-day" tracking, and instead uses a session-based approach to accurately log sleep duration and history.
+A sleep-tracking web application designed specifically for people like myself with irregular sleep schedules. This tool moves away from traditional "calendar-day" tracking, and instead uses a session-based approach to accurately log sleep duration and history.
+Access here: https://15113-hw4-sleep.vercel.app/
 
 ### Key features
-- Uses a "Wake - 1" logic to attribute sleep sessions to the correct "night," regardless of the actual time or day you wake up.
+- Uses a "Wake - 1" logic to attribute sleep sessions to the correct "night," regardless of the actual time or day you go to bed.
 - A "Forgot?" slider allows you to backdate logs by up to 120 minutes if you forget to click the button immediately.
-- A "flipped" card view displays precise sleep durations and wake-up times for previous sessions.
+- A "flipped" card view displays length of previous sessions
+- No wasting battery or data on recording your sleep audio!
 
 ### Technical details
 About the tech stack

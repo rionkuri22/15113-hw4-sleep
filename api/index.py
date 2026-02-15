@@ -30,7 +30,7 @@ def get_history():
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        # Return 100 rows to ensure we catch the start of current sessions
+        # Fetch 100 rows to ensure we catch recent sessions
         cur.execute("SELECT id, event_type, created_at FROM sleep_events ORDER BY created_at DESC LIMIT 100")
         rows = cur.fetchall()
         cur.close()
@@ -43,12 +43,13 @@ def get_history():
 async def log_event(event_type: str, offset_minutes: int = 0):
     try:
         now_utc = datetime.now(timezone.utc)
+        # Calculate the intended timestamp
         actual_time = now_utc - timedelta(minutes=int(offset_minutes))
         
         conn = get_db_connection()
         cur = conn.cursor()
         
-        # Check for duplicate events within 5 minutes to prevent double-clicks
+        # 1. Fetch the very last log of the same type
         cur.execute("""
             SELECT id, created_at FROM sleep_events 
             WHERE event_type = %s 
@@ -59,7 +60,16 @@ async def log_event(event_type: str, offset_minutes: int = 0):
         should_update = False
         if last_entry:
             last_id, last_time = last_entry
-            if (now_utc - last_time).total_seconds() < 300:
+            
+            # CRITICAL FIX: Compare the new actual_time with the DB last_time.
+            # If they are within 5 minutes of each other, it's a duplicate/correction.
+            # Previously this failed because it compared 'now' vs 'offset time'.
+            if last_time.tzinfo is None:
+                last_time = last_time.replace(tzinfo=timezone.utc)
+                
+            time_diff = abs((actual_time - last_time).total_seconds())
+            
+            if time_diff < 300: # 5 minutes
                 should_update = True
                 target_id = last_id
 
@@ -69,9 +79,27 @@ async def log_event(event_type: str, offset_minutes: int = 0):
             cur.execute("INSERT INTO sleep_events (event_type, created_at) VALUES (%s, %s)", (event_type, actual_time))
         
         conn.commit()
+
+        # 2. Calculate duration if waking up
+        duration_hours = None
+        if event_type == "wake":
+            cur.execute("""
+                SELECT created_at FROM sleep_events 
+                WHERE event_type = 'sleep' AND created_at < %s 
+                ORDER BY created_at DESC LIMIT 1
+            """, (actual_time,))
+            last_sleep = cur.fetchone()
+            
+            if last_sleep:
+                sleep_time = last_sleep[0]
+                if sleep_time.tzinfo is None:
+                    sleep_time = sleep_time.replace(tzinfo=timezone.utc)
+                diff_seconds = (actual_time - sleep_time).total_seconds()
+                duration_hours = diff_seconds / 3600.0
+
         cur.close()
         conn.close()
         
-        return {"status": "success"}
+        return {"status": "success", "duration": duration_hours}
     except Exception as e:
         return {"status": "error", "message": str(e)}
