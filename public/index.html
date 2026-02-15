@@ -23,7 +23,7 @@
             position: relative; display: flex; flex-direction: column; justify-content: center;
         }
         
-        .nav-btn { position: absolute; top: 25px; right: 25px; background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.3); color: inherit; padding: 8px 18px; font-size: 0.8rem; border-radius: 12px; cursor: pointer; z-index: 10; }
+        .nav-btn { position: absolute; top: 25px; right: 25px; background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.3); color: inherit; padding: 8px 18px; font-size: 0.8rem; border-radius: 12px; cursor: pointer; z-index: 10;}
         h1 { font-size: 2.2rem; margin-bottom: 5px; }
         #live-date { font-size: 1.1rem; opacity: 0.9; margin-bottom: 10px; font-weight: 500; }
         
@@ -40,7 +40,7 @@
         
         #history-view { display: none; text-align: left; max-height: 40vh; overflow-y: auto; }
         .history-item { border-bottom: 1px solid rgba(255,255,255,0.1); padding: 15px 0; display: flex; justify-content: space-between; align-items: center; }
-        .history-hours { font-weight: 800; font-size: 1.1rem; text-align: right; min-width: 80px; }
+        .history-hours { font-weight: 800; font-size: 1.2rem; }
     </style>
 </head>
 <body class="mode-sleep">
@@ -59,7 +59,7 @@
         </div>
         <div id="history-view">
             <h2 style="margin:0 0 10px 0">Sleep History</h2>
-            <div id="history-list">Loading logs...</div>
+            <div id="history-list">Analyzing logs...</div>
         </div>
     </div>
 
@@ -75,6 +75,13 @@
             document.getElementById('live-date').innerText = now.toLocaleDateString('en-US', options);
         }
 
+        function formatDuration(decimalHours) {
+            const totalMinutes = Math.round(decimalHours * 60);
+            const h = Math.floor(totalMinutes / 60);
+            const m = totalMinutes % 60;
+            return h > 0 ? `${h}h ${m}m` : `${m}m`;
+        }
+
         async function toggleView() {
             const main = document.getElementById('main-view');
             const hist = document.getElementById('history-view');
@@ -86,51 +93,42 @@
             }
         }
 
-        // Helper to convert decimal hours to string format
-        function formatDuration(decimalHours) {
-            const totalMinutes = Math.round(decimalHours * 60);
-            const h = Math.floor(totalMinutes / 60);
-            const m = totalMinutes % 60;
-            if (h > 0) return `${h}h ${m}m`;
-            return `${m}m`;
-        }
-
         function updateUI(lastEvent) {
             currentState = lastEvent;
             if (lastEvent === 'sleep') {
                 document.body.className = 'mode-wake';
-                actionBtn.style.display = '';
-                feedbackDiv.innerText = '';
                 actionBtn.innerText = "☀️ Rise & Shine";
             } else {
                 document.body.className = 'mode-sleep';
-                actionBtn.style.display = '';
                 actionBtn.innerText = "🌙 Clocking Out";
-                feedbackDiv.innerText = '';
             }
+            actionBtn.style.display = '';
+            feedbackDiv.innerText = '';
         }
 
         async function sendLog() {
             const offset = parseInt(document.getElementById('time-offset').value);
             const nextType = currentState === 'sleep' ? 'wake' : 'sleep';
-            const previousState = currentState;
-
+            
             statusDiv.innerText = "Saving...";
             actionBtn.disabled = true;
 
             try {
+                // Post the log and wait for database confirmation
                 const res = await fetch(`/api/log?event_type=${nextType}&offset_minutes=${offset}`, { method: 'POST' });
-                if (!res.ok) throw new Error("Sync failed");
-                
-                // Immediately switch UI state visually
+                const result = await res.json();
+                if (!res.ok) throw new Error(result.message);
+
+                // Update UI theme immediately after success
                 updateUI(nextType);
 
                 if (nextType === 'wake') {
+                    // Fetch fresh history to get the paired timestamps
                     const histRes = await fetch('/api/history');
                     const history = await histRes.json();
                     
-                    // The first item is the wake we just logged
-                    const currentWake = history[0];
+                    // Match the wake we just logged with the previous sleep
+                    const currentWake = history[0]; 
                     const prevSleep = history.find((h, i) => i > 0 && h.type === 'sleep');
 
                     if (currentWake && prevSleep) {
@@ -155,29 +153,28 @@
                 document.getElementById('time-offset').value = 0;
                 document.getElementById('offset-val').innerText = 0;
             } catch (err) {
-                updateUI(previousState);
-                statusDiv.innerText = "Error!";
+                statusDiv.innerText = "Error: " + err.message;
             } finally {
                 actionBtn.disabled = false;
             }
         }
 
         async function loadHistory() {
-            try {
-                const res = await fetch('/api/history');
-                const data = await res.json();
-                const list = document.getElementById('history-list');
-                list.innerHTML = '';
+            const res = await fetch('/api/history');
+            const data = await res.json();
+            const list = document.getElementById('history-list');
+            list.innerHTML = '';
 
-                let i = 0;
-                while (i < data.length) {
-                    if (data[i].type === 'wake') {
-                        const sleepEntry = data.slice(i + 1).find(entry => entry.type === 'sleep');
-                        if (sleepEntry) {
-                            const wakeTime = new Date(data[i].time);
-                            const sleepTime = new Date(sleepEntry.time);
-                            const duration = (wakeTime - sleepTime) / (1000 * 60 * 60);
+            let i = 0;
+            while (i < data.length) {
+                if (data[i].type === 'wake') {
+                    const sleepEntry = data.slice(i + 1).find(entry => entry.type === 'sleep');
+                    if (sleepEntry) {
+                        const wakeTime = new Date(data[i].time);
+                        const sleepTime = new Date(sleepEntry.time);
+                        const duration = (wakeTime - sleepTime) / (1000 * 60 * 60);
 
+                        if (duration > 0.02) {
                             const displayDate = new Date(sleepTime);
                             const dateLabel = displayDate.toLocaleDateString('en-US', {month: 'short', day: 'numeric', weekday: 'short'});
 
@@ -187,8 +184,8 @@
                                 <div style="display:flex; flex-direction:column;">
                                     <span style="font-weight:600;">${dateLabel}</span>
                                     <span style="font-size:0.7rem; opacity:0.6;">
-                                        ${sleepTime.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})} - 
-                                        ${wakeTime.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
+                                        ${sleepTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} - 
+                                        ${wakeTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
                                     </span>
                                 </div>
                                 <span class="history-hours">${formatDuration(duration)}</span>
@@ -198,10 +195,8 @@
                             continue;
                         }
                     }
-                    i++;
                 }
-            } catch (e) {
-                document.getElementById('history-list').innerText = "History unavailable.";
+                i++;
             }
         }
 
