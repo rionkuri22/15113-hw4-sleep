@@ -27,7 +27,7 @@
         h1 { font-size: 2.2rem; margin-bottom: 5px; }
         #live-date { font-size: 1.1rem; opacity: 0.9; margin-bottom: 10px; font-weight: 500; }
         
-        /* Restored Original Clean Style */
+        /* Duration Text - Forced Visibility with !important */
         #duration-feedback { 
             font-size: 1.8rem; 
             font-weight: 800; 
@@ -35,7 +35,7 @@
             min-height: 1.6rem; 
             color: #1a237e; /* Dark Blue */
             display: none; 
-            /* No text-shadow, clean flat look */
+            /* Clean flat look, no shadow */
         }
         
         button.btn-main { width: 100%; padding: 25px; font-size: 1.4rem; font-weight: 700; border: none; border-radius: 50px; cursor: pointer; transition: 0.2s; }
@@ -50,7 +50,7 @@
         .history-item { border-bottom: 1px solid rgba(255,255,255,0.1); padding: 15px 0; display: flex; justify-content: space-between; align-items: center; }
         .history-hours { font-weight: 800; font-size: 1.2rem; min-width: 80px; text-align: right; }
         
-        /* Feedback Mode: Hides button, shows text */
+        /* FEEDBACK MODE: Hide Button, Show Text */
         .feedback-mode #action-btn { display: none !important; }
         .feedback-mode #duration-feedback { display: block !important; }
         .feedback-mode .override-section { opacity: 0; pointer-events: none; }
@@ -148,8 +148,8 @@
                     // 1. Force Feedback Mode (Show Text, Hide Button)
                     mainView.classList.add('feedback-mode');
                     
-                    // 2. Update Text (Dark Blue)
-                    if (data.duration !== null) {
+                    // 2. Display the server-calculated duration
+                    if (data.duration !== null && data.duration !== undefined) {
                         feedbackDiv.innerText = `You slept for ${formatDuration(data.duration)}`;
                     } else {
                         feedbackDiv.innerText = "Rise & Shine!";
@@ -162,7 +162,7 @@
                     currentState = 'wake'; 
                     document.body.className = 'mode-wake'; // Ensure Day theme is active
 
-                    // 5. Wait for tap to bring back the "Clocking Out" button
+                    // 5. Wait for user tap to bring back the "Clocking Out" button
                     const proceedToNextState = () => {
                         updateUI(nextType); 
                         document.body.removeEventListener('click', proceedToNextState);
@@ -195,6 +195,7 @@
             list.innerHTML = '';
 
             // Chronological Sort: Oldest to Newest
+            // This ensures we can pair them correctly
             const events = data.sort((a, b) => a.timestamp - b.timestamp);
             const sessions = [];
             let currentSleepStart = null;
@@ -216,7 +217,7 @@
             if (sessions.length === 0) {
                 list.innerHTML = "<div style='opacity:0.6; margin-top:10px'>No sessions found.</div>";
             } else {
-                // Display Newest First
+                // Display Newest First (Reverse chronological)
                 sessions.reverse().forEach(session => {
                     const sleepTime = new Date(session.start * 1000);
                     const wakeTime = new Date(session.end * 1000);
