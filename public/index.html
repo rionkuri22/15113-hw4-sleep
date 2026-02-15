@@ -18,8 +18,7 @@
             backdrop-filter: blur(25px); -webkit-backdrop-filter: blur(25px); 
             border: 1px solid rgba(255, 255, 255, 0.2); 
             padding: 40px; border-radius: 40px; 
-            width: 85%; max-width: 450px; 
-            min-height: 50vh; 
+            width: 85%; max-width: 450px; min-height: 50vh; 
             box-shadow: 0 20px 50px rgba(0,0,0,0.3); 
             position: relative; display: flex; flex-direction: column; justify-content: center;
         }
@@ -27,7 +26,7 @@
         .nav-btn { position: absolute; top: 25px; right: 25px; background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.3); color: inherit; padding: 8px 18px; font-size: 0.8rem; border-radius: 12px; cursor: pointer; }
         h1 { font-size: 2.2rem; margin-bottom: 5px; }
         #live-date { font-size: 1.1rem; opacity: 0.9; margin-bottom: 10px; font-weight: 500; }
-        #duration-feedback { font-size: 1.2rem; font-weight: 700; margin-bottom: 20px; min-height: 1.5rem; color: #1a237e; }
+        #duration-feedback { font-size: 1.3rem; font-weight: 800; margin-bottom: 20px; color: #1a237e; min-height: 1.6rem; }
         .mode-sleep #duration-feedback { color: #FFCC33; }
         
         button.btn-main { width: 100%; padding: 25px; font-size: 1.4rem; font-weight: 700; border: none; border-radius: 50px; cursor: pointer; transition: 0.2s; }
@@ -46,18 +45,17 @@
 <body class="mode-sleep">
     <div class="glass-card">
         <button class="nav-btn" onclick="toggleView()">Flip Card</button>
-        
         <div id="main-view">
             <h1>Hello, Rion</h1>
             <div id="live-date">...</div>
-            <div id="duration-feedback"></div> <button id="action-btn" class="btn-main" onclick="sendLog()">...</button>
+            <div id="duration-feedback"></div>
+            <button id="action-btn" class="btn-main" onclick="sendLog()">...</button>
             <div class="override-section">
                 <label>Forgot? <span id="offset-val">0</span> mins ago</label>
                 <input type="range" id="time-offset" min="0" max="120" value="0" oninput="document.getElementById('offset-val').innerText = this.value">
             </div>
             <div id="status">Syncing...</div>
         </div>
-
         <div id="history-view">
             <h2 style="margin:0 0 10px 0">Sleep History</h2>
             <div id="history-list">Analyzing logs...</div>
@@ -68,6 +66,7 @@
         let currentState = 'wake';
         const actionBtn = document.getElementById('action-btn');
         const feedbackDiv = document.getElementById('duration-feedback');
+        const statusDiv = document.getElementById('status');
 
         function updateDate() {
             const now = new Date();
@@ -94,7 +93,7 @@
             } else {
                 document.body.className = 'mode-sleep';
                 actionBtn.innerText = "🌙 Clocking Out";
-                feedbackDiv.innerText = ""; // Clear feedback when going to sleep
+                feedbackDiv.innerText = ""; 
             }
         }
 
@@ -103,32 +102,38 @@
             const nextType = currentState === 'sleep' ? 'wake' : 'sleep';
             const previousState = currentState;
 
-            // Optimistic Update
             updateUI(nextType);
-            document.getElementById('status').innerText = "Syncing...";
+            statusDiv.innerText = "Saving to Neon...";
 
             try {
                 const res = await fetch(`/api/log?event_type=${nextType}&offset_minutes=${offset}`, { method: 'POST' });
                 if (!res.ok) throw new Error();
                 
-                document.getElementById('status').innerText = "Logged!";
+                statusDiv.innerText = "Saved!";
                 document.getElementById('time-offset').value = 0;
                 document.getElementById('offset-val').innerText = 0;
 
-                // If we just woke up, show how long we slept
                 if (nextType === 'wake') {
-                    const histRes = await fetch('/api/history');
-                    const history = await histRes.json();
-                    if (history.length >= 2 && history[1].type === 'sleep') {
-                        const wakeTime = new Date(history[0].time);
-                        const sleepTime = new Date(history[1].time);
-                        const duration = (wakeTime - sleepTime) / (1000 * 60 * 60);
-                        feedbackDiv.innerText = `You slept for ${duration.toFixed(1)} hours!`;
-                    }
+                    // Small delay to let Neon finish the write
+                    setTimeout(async () => {
+                        const histRes = await fetch('/api/history');
+                        const history = await histRes.json();
+                        
+                        // We need to find the first 'sleep' event that happened BEFORE this 'wake'
+                        const wakeObj = history.find(h => h.type === 'wake');
+                        const sleepObj = history.find(h => h.type === 'sleep' && new Date(h.time) < new Date(wakeObj.time));
+                        
+                        if (wakeObj && sleepObj) {
+                            const diff = (new Date(wakeObj.time) - new Date(sleepObj.time)) / (1000 * 60 * 60);
+                            if (diff > 0) {
+                                feedbackDiv.innerText = `Slept ${diff.toFixed(1)} hours!`;
+                            }
+                        }
+                    }, 800);
                 }
             } catch (err) {
                 updateUI(previousState);
-                document.getElementById('status').innerText = "Sync failed.";
+                statusDiv.innerText = "Sync failed.";
             }
         }
 
@@ -140,28 +145,30 @@
 
             for (let i = 0; i < data.length - 1; i++) {
                 const current = data[i];
-                const next = data[i+1];
+                // Search for the next available sleep event
+                if (current.type === 'wake') {
+                    const sleep = data.slice(i+1).find(h => h.type === 'sleep');
+                    if (sleep) {
+                        const wakeTime = new Date(current.time);
+                        const sleepTime = new Date(sleep.time);
+                        const duration = (wakeTime - sleepTime) / (1000 * 60 * 60);
 
-                if (current.type === 'wake' && next.type === 'sleep') {
-                    const wakeTime = new Date(current.time);
-                    const sleepTime = new Date(next.time);
-                    const duration = (wakeTime - sleepTime) / (1000 * 60 * 60);
+                        if (duration > 0.08) {
+                            const displayDate = new Date(wakeTime);
+                            displayDate.setDate(displayDate.getDate() - 1);
+                            const dateLabel = displayDate.toLocaleDateString('en-US', {month: 'short', day: 'numeric', weekday: 'short'});
 
-                    if (duration > 0.08) {
-                        const displayDate = new Date(wakeTime);
-                        displayDate.setDate(displayDate.getDate() - 1);
-                        const dateLabel = displayDate.toLocaleDateString('en-US', {month: 'short', day: 'numeric', weekday: 'short'});
-
-                        const item = document.createElement('div');
-                        item.className = 'history-item';
-                        item.innerHTML = `
-                            <div style="display:flex; flex-direction:column;">
-                                <span style="font-weight:600;">${dateLabel}</span>
-                                <span style="font-size:0.7rem; opacity:0.6;">Up at ${wakeTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
-                            </div>
-                            <span class="history-hours">${duration.toFixed(1)} hrs</span>
-                        `;
-                        list.appendChild(item);
+                            const item = document.createElement('div');
+                            item.className = 'history-item';
+                            item.innerHTML = `
+                                <div style="display:flex; flex-direction:column;">
+                                    <span style="font-weight:600;">${dateLabel}</span>
+                                    <span style="font-size:0.7rem; opacity:0.6;">Up at ${wakeTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                                </div>
+                                <span class="history-hours">${duration.toFixed(1)} hrs</span>
+                            `;
+                            list.appendChild(item);
+                        }
                     }
                 }
             }
@@ -173,10 +180,10 @@
                 const res = await fetch('/api/state');
                 const data = await res.json();
                 updateUI(data.last_event);
-                document.getElementById('status').innerText = "Ready";
+                statusDiv.innerText = "Ready";
             } catch (err) {
                 updateUI('wake');
-                document.getElementById('status').innerText = "Offline";
+                statusDiv.innerText = "Offline";
             }
         };
     </script>
