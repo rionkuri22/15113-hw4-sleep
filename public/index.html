@@ -112,34 +112,41 @@
             const nextType = currentState === 'sleep' ? 'wake' : 'sleep';
             
             statusDiv.innerText = "Saving...";
-            actionBtn.disabled = true; // Block double clicks
+            actionBtn.disabled = true;
 
             try {
-                // Add timestamp to prevent caching
+                // Post to server with timestamp
                 const res = await fetch(`/api/log?event_type=${nextType}&offset_minutes=${offset}&t=${Date.now()}`, { method: 'POST' });
                 const data = await res.json();
-                
                 if (data.status === 'error') throw new Error(data.message);
 
                 updateUI(nextType);
                 statusDiv.innerText = "Saved!";
 
-                if (nextType === 'wake' && data.duration !== null) {
-                    feedbackDiv.innerText = `Slept ${formatDuration(data.duration)}!`;
-                    actionBtn.style.display = 'none';
-                    
-                    const card = document.querySelector('.glass-card');
-                    const resetUI = () => {
-                        feedbackDiv.innerText = '';
-                        actionBtn.style.display = '';
-                        card.removeEventListener('click', resetUI);
-                    };
-                    setTimeout(() => card.addEventListener('click', resetUI), 100);
+                // If waking up, refresh history to calculate duration properly
+                if (nextType === 'wake') {
+                    // Slight delay to allow DB consistency
+                    setTimeout(async () => {
+                        await loadHistory();
+                        // Grab the top item from the history list we just rendered
+                        const topItem = document.querySelector('.history-hours');
+                        if (topItem) {
+                            feedbackDiv.innerText = `Slept ${topItem.innerText}!`;
+                            actionBtn.style.display = 'none';
+                            
+                            const card = document.querySelector('.glass-card');
+                            const resetUI = () => {
+                                feedbackDiv.innerText = '';
+                                actionBtn.style.display = '';
+                                card.removeEventListener('click', resetUI);
+                            };
+                            setTimeout(() => card.addEventListener('click', resetUI), 100);
+                        }
+                    }, 500);
                 }
 
                 document.getElementById('time-offset').value = 0;
                 document.getElementById('offset-val').innerText = 0;
-                loadHistory(); 
 
             } catch (err) {
                 statusDiv.innerText = "Error: " + err.message;
@@ -154,38 +161,60 @@
             const list = document.getElementById('history-list');
             list.innerHTML = '';
 
-            let i = 0;
-            while (i < data.length) {
-                if (data[i].type === 'wake') {
-                    const sleepEntry = data.slice(i + 1).find(entry => entry.type === 'sleep');
-                    if (sleepEntry) {
-                        const wakeTime = new Date(data[i].timestamp * 1000);
-                        const sleepTime = new Date(sleepEntry.timestamp * 1000);
-                        const diffHours = (data[i].timestamp - sleepEntry.timestamp) / 3600;
+            // 1. Sort Chronologically (Oldest to Newest) to replay the timeline
+            const events = data.sort((a, b) => a.timestamp - b.timestamp);
+            
+            const sessions = [];
+            let currentSleepStart = null;
 
-                        if (diffHours > 0.00) {
-                            const dateLabel = sleepTime.toLocaleDateString('en-US', {month: 'short', day: 'numeric', weekday: 'short'});
-
-                            const item = document.createElement('div');
-                            item.className = 'history-item';
-                            item.innerHTML = `
-                                <div style="display:flex; flex-direction:column;">
-                                    <span style="font-weight:600;">${dateLabel}</span>
-                                    <span style="font-size:0.7rem; opacity:0.6;">
-                                        ${sleepTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} - 
-                                        ${wakeTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                                    </span>
-                                </div>
-                                <span class="history-hours">${formatDuration(diffHours)}</span>
-                            `;
-                            list.appendChild(item);
-                            i = data.indexOf(sleepEntry) + 1;
-                            continue;
+            // 2. State Machine: Replay events to build sessions
+            for (let ev of events) {
+                if (ev.type === 'sleep') {
+                    // Logic: First sleep wins. 
+                    // If we are already "asleep", ignore new sleep clicks (treat as accidental doubles)
+                    // unless the new sleep is MUCH later (e.g. 12 hours), but assuming single night for now.
+                    if (currentSleepStart === null) {
+                        currentSleepStart = ev.timestamp;
+                    }
+                } else if (ev.type === 'wake') {
+                    if (currentSleepStart !== null) {
+                        // Found a pair!
+                        const diff = (ev.timestamp - currentSleepStart) / 3600;
+                        if (diff > 0.05) { // Filter out < 3 min accidents
+                            sessions.push({
+                                start: currentSleepStart,
+                                end: ev.timestamp,
+                                duration: diff
+                            });
                         }
+                        currentSleepStart = null; // Reset state to Awake
                     }
                 }
-                i++;
             }
+
+            // 3. Render sessions (Newest first)
+            sessions.reverse().forEach(session => {
+                const sleepTime = new Date(session.start * 1000);
+                const wakeTime = new Date(session.end * 1000);
+                
+                const dateLabel = sleepTime.toLocaleDateString('en-US', {month: 'short', day: 'numeric', weekday: 'short'});
+
+                const item = document.createElement('div');
+                item.className = 'history-item';
+                item.innerHTML = `
+                    <div style="display:flex; flex-direction:column;">
+                        <span style="font-weight:600;">${dateLabel}</span>
+                        <span style="font-size:0.7rem; opacity:0.6;">
+                            ${sleepTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} - 
+                            ${wakeTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                        </span>
+                    </div>
+                    <span class="history-hours">${formatDuration(session.duration)}</span>
+                `;
+                list.appendChild(item);
+            });
+
+            if (sessions.length === 0) list.innerHTML = "<div style='opacity:0.6; margin-top:10px'>No complete sleep sessions yet.</div>";
         }
 
         window.onload = async () => {
