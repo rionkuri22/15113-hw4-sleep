@@ -23,7 +23,7 @@
             position: relative; display: flex; flex-direction: column; justify-content: center;
         }
         
-        .nav-btn { position: absolute; top: 25px; right: 25px; background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.3); color: inherit; padding: 8px 18px; font-size: 0.8rem; border-radius: 12px; cursor: pointer; }
+        .nav-btn { position: absolute; top: 25px; right: 25px; background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.3); color: inherit; padding: 8px 18px; font-size: 0.8rem; border-radius: 12px; cursor: pointer; z-index: 10; }
         h1 { font-size: 2.2rem; margin-bottom: 5px; }
         #live-date { font-size: 1.1rem; opacity: 0.9; margin-bottom: 10px; font-weight: 500; }
         
@@ -59,7 +59,7 @@
         </div>
         <div id="history-view">
             <h2 style="margin:0 0 10px 0">Sleep History</h2>
-            <div id="history-list">Analyzing logs...</div>
+            <div id="history-list">Loading latest data...</div>
         </div>
     </div>
 
@@ -75,14 +75,19 @@
             document.getElementById('live-date').innerText = now.toLocaleDateString('en-US', options);
         }
 
-        function toggleView() {
+        async function toggleView() {
             const main = document.getElementById('main-view');
             const hist = document.getElementById('history-view');
+            const list = document.getElementById('history-list');
+
             if (main.style.display === 'none') {
-                main.style.display = 'block'; hist.style.display = 'none';
+                main.style.display = 'block'; 
+                hist.style.display = 'none';
             } else {
-                main.style.display = 'none'; hist.style.display = 'block';
-                loadHistory();
+                main.style.display = 'none'; 
+                hist.style.display = 'block';
+                list.innerText = "Refreshing logs..."; // Visual confirmation of loading
+                await loadHistory();
             }
         }
 
@@ -102,104 +107,101 @@
         }
 
         async function sendLog() {
-            const offset = document.getElementById('time-offset').value;
+            const offset = parseInt(document.getElementById('time-offset').value);
             const nextType = currentState === 'sleep' ? 'wake' : 'sleep';
-            const previousState = currentState;
+            
+            statusDiv.innerText = "Saving to database...";
+            actionBtn.disabled = true; // Prevent double clicks
 
-            updateUI(nextType);
-            statusDiv.innerText = "Saving...";
-
-            if (nextType === 'wake') {
-                try {
+            try {
+                // 1. Send the data to the server FIRST
+                const res = await fetch(`/api/log?event_type=${nextType}&offset_minutes=${offset}`, { method: 'POST' });
+                if (!res.ok) throw new Error("Server error");
+                
+                // 2. ONLY AFTER successful save, calculate duration and update UI
+                if (nextType === 'wake') {
                     const histRes = await fetch('/api/history');
                     const history = await histRes.json();
                     
-                    // Find the most recent sleep event
-                    const sleepObj = history.find(h => h.type === 'sleep');
-                    
-                    // Calculate "Now" accounting for the offset selected
-                    const wakeTimeWithOffset = new Date(Date.now() - (offset * 60000));
+                    // The very first item in history is the "wake" we just saved
+                    // The second item (index 1) should be the previous "sleep"
+                    const currentWake = history[0];
+                    const prevSleep = history.find((h, index) => index > 0 && h.type === 'sleep');
 
-                    if (sleepObj) {
-                        const sleepTime = new Date(sleepObj.time);
-                        const diff = (wakeTimeWithOffset - sleepTime) / (1000 * 60 * 60);
+                    if (currentWake && prevSleep) {
+                        const wakeTime = new Date(currentWake.time);
+                        const sleepTime = new Date(prevSleep.time);
+                        const diff = (wakeTime - sleepTime) / (1000 * 60 * 60);
                         
-                        if (diff > 0) {
-                            feedbackDiv.innerText = `Slept ${diff.toFixed(1)} hours!`;
-                            actionBtn.style.display = 'none';
-                            const card = document.querySelector('.glass-card');
-                            const proceedToNextDay = () => {
-                                updateUI('wake');
-                                feedbackDiv.innerText = '';
-                                actionBtn.style.display = '';
-                                card.removeEventListener('click', proceedToNextDay);
-                            };
-                            setTimeout(() => {
-                                card.addEventListener('click', proceedToNextDay);
-                            }, 100);
-                        }
-                    }
-                } catch (e) {
-                    actionBtn.style.display = '';
-                }
-            }
+                        updateUI('sleep'); // Set UI to wake mode
+                        feedbackDiv.innerText = `Slept ${diff.toFixed(1)} hours!`;
+                        actionBtn.style.display = 'none';
 
-            try {
-                const res = await fetch(`/api/log?event_type=${nextType}&offset_minutes=${offset}`, { method: 'POST' });
-                if (!res.ok) throw new Error();
+                        const card = document.querySelector('.glass-card');
+                        const resetUI = () => {
+                            feedbackDiv.innerText = '';
+                            actionBtn.style.display = '';
+                            card.removeEventListener('click', resetUI);
+                        };
+                        setTimeout(() => card.addEventListener('click', resetUI), 100);
+                    }
+                } else {
+                    updateUI('wake'); // Switch to sleep mode
+                }
+
                 statusDiv.innerText = "Saved!";
                 document.getElementById('time-offset').value = 0;
                 document.getElementById('offset-val').innerText = 0;
             } catch (err) {
-                updateUI(previousState);
-                statusDiv.innerText = "Sync failed.";
+                statusDiv.innerText = "Error: " + err.message;
+            } finally {
+                actionBtn.disabled = false;
             }
         }
 
         async function loadHistory() {
-            const res = await fetch('/api/history');
-            const data = await res.json();
-            const list = document.getElementById('history-list');
-            list.innerHTML = '';
+            try {
+                const res = await fetch('/api/history');
+                const data = await res.json();
+                const list = document.getElementById('history-list');
+                list.innerHTML = '';
 
-            let i = 0;
-            while (i < data.length) {
-                // Find a wake event to start a pair
-                if (data[i].type === 'wake') {
-                    // Look for the immediate next 'sleep' event in the past logs
-                    const sleepEntry = data.slice(i + 1).find(entry => entry.type === 'sleep');
-                    
-                    if (sleepEntry) {
-                        const wakeTime = new Date(data[i].time);
-                        const sleepTime = new Date(sleepEntry.time);
-                        const duration = (wakeTime - sleepTime) / (1000 * 60 * 60);
+                let i = 0;
+                while (i < data.length) {
+                    if (data[i].type === 'wake') {
+                        const sleepEntry = data.slice(i + 1).find(entry => entry.type === 'sleep');
+                        
+                        if (sleepEntry) {
+                            const wakeTime = new Date(data[i].time);
+                            const sleepTime = new Date(sleepEntry.time);
+                            const duration = (wakeTime - sleepTime) / (1000 * 60 * 60);
 
-                        // Threshold: skip very short accidental logs
-                        if (duration > 0.05) {
-                            const displayDate = new Date(sleepTime);
-                            const dateLabel = displayDate.toLocaleDateString('en-US', {month: 'short', day: 'numeric', weekday: 'short'});
+                            if (duration > 0.01) { // Shows even short naps for testing
+                                const displayDate = new Date(sleepTime);
+                                const dateLabel = displayDate.toLocaleDateString('en-US', {month: 'short', day: 'numeric', weekday: 'short'});
 
-                            const item = document.createElement('div');
-                            item.className = 'history-item';
-                            item.innerHTML = `
-                                <div style="display:flex; flex-direction:column;">
-                                    <span style="font-weight:600;">${dateLabel}</span>
-                                    <span style="font-size:0.7rem; opacity:0.6;">
-                                        ${sleepTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} - 
-                                        ${wakeTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                                    </span>
-                                </div>
-                                <span class="history-hours">${duration.toFixed(1)} hrs</span>
-                            `;
-                            list.appendChild(item);
-                            
-                            // Move the index to start searching AFTER this sleep entry
-                            i = data.indexOf(sleepEntry) + 1;
-                            continue;
+                                const item = document.createElement('div');
+                                item.className = 'history-item';
+                                item.innerHTML = `
+                                    <div style="display:flex; flex-direction:column;">
+                                        <span style="font-weight:600;">${dateLabel}</span>
+                                        <span style="font-size:0.7rem; opacity:0.6;">
+                                            ${sleepTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} - 
+                                            ${wakeTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                                        </span>
+                                    </div>
+                                    <span class="history-hours">${duration.toFixed(1)} hrs</span>
+                                `;
+                                list.appendChild(item);
+                                i = data.indexOf(sleepEntry) + 1;
+                                continue;
+                            }
                         }
                     }
+                    i++;
                 }
-                i++;
+            } catch (e) {
+                document.getElementById('history-list').innerText = "Failed to load history.";
             }
         }
 

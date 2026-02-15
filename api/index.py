@@ -11,7 +11,6 @@ app = FastAPI()
 
 @app.get("/api/state")
 def get_last_state():
-    """Returns the last event to set the UI theme"""
     try:
         conn = psycopg2.connect(DATABASE_URL)
         cur = conn.cursor()
@@ -25,11 +24,10 @@ def get_last_state():
 
 @app.get("/api/history")
 def get_history():
-    """Returns logs for duration calculation"""
     try:
         conn = psycopg2.connect(DATABASE_URL)
         cur = conn.cursor()
-        cur.execute("SELECT event_type, created_at FROM sleep_events ORDER BY created_at DESC LIMIT 30")
+        cur.execute("SELECT event_type, created_at FROM sleep_events ORDER BY created_at DESC LIMIT 50")
         rows = cur.fetchall()
         cur.close()
         conn.close()
@@ -39,10 +37,8 @@ def get_history():
 
 @app.post("/api/log")
 async def log_event(event_type: str, offset_minutes: int = 0):
-    """Logs event with UTC and integer offset"""
     try:
         now_utc = datetime.now(timezone.utc)
-        # Correctly apply the retrospective offset
         actual_time = now_utc - timedelta(minutes=int(offset_minutes))
         
         conn = psycopg2.connect(DATABASE_URL)
