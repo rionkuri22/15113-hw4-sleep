@@ -1,7 +1,7 @@
 import os
 import psycopg2
 from fastapi import FastAPI
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -39,10 +39,12 @@ def get_history():
 
 @app.post("/api/log")
 async def log_event(event_type: str, offset_minutes: int = 0):
-    """Logs event with offset for forgotten clicks"""
+    """Logs event with offset for forgotten clicks using UTC"""
     try:
-        # Ensure offset is an integer
-        actual_time = datetime.now() - timedelta(minutes=int(offset_minutes))
+        # Use timezone-aware UTC to avoid 'future' time bugs
+        now_utc = datetime.now(timezone.utc)
+        actual_time = now_utc - timedelta(minutes=int(offset_minutes))
+        
         conn = psycopg2.connect(DATABASE_URL)
         cur = conn.cursor()
         cur.execute(

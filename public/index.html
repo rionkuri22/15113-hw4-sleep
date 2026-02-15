@@ -114,18 +114,18 @@
                 document.getElementById('offset-val').innerText = 0;
 
                 if (nextType === 'wake') {
-                    // Small delay to let Neon finish the write
+                    // Give Neon time to process the write
                     setTimeout(async () => {
                         const histRes = await fetch('/api/history');
                         const history = await histRes.json();
                         
-                        // We need to find the first 'sleep' event that happened BEFORE this 'wake'
+                        // Robust Pairing: Find the wake and the sleep that happened before it
                         const wakeObj = history.find(h => h.type === 'wake');
-                        const sleepObj = history.find(h => h.type === 'sleep' && new Date(h.time) < new Date(wakeObj.time));
+                        const sleepObj = history.slice(history.indexOf(wakeObj) + 1).find(h => h.type === 'sleep');
                         
                         if (wakeObj && sleepObj) {
                             const diff = (new Date(wakeObj.time) - new Date(sleepObj.time)) / (1000 * 60 * 60);
-                            if (diff > 0) {
+                            if (diff > 0.05) {
                                 feedbackDiv.innerText = `Slept ${diff.toFixed(1)} hours!`;
                             }
                         }
@@ -143,19 +143,19 @@
             const list = document.getElementById('history-list');
             list.innerHTML = '';
 
-            for (let i = 0; i < data.length - 1; i++) {
-                const current = data[i];
-                // Search for the next available sleep event
-                if (current.type === 'wake') {
-                    const sleep = data.slice(i+1).find(h => h.type === 'sleep');
-                    if (sleep) {
-                        const wakeTime = new Date(current.time);
-                        const sleepTime = new Date(sleep.time);
+            for (let i = 0; i < data.length; i++) {
+                if (data[i].type === 'wake') {
+                    // Find the sleep event that matches this wake
+                    const sleepEntry = data.slice(i + 1).find(entry => entry.type === 'sleep');
+                    
+                    if (sleepEntry) {
+                        const wakeTime = new Date(data[i].time);
+                        const sleepTime = new Date(sleepEntry.time);
                         const duration = (wakeTime - sleepTime) / (1000 * 60 * 60);
 
                         if (duration > 0.08) {
-                            const displayDate = new Date(wakeTime);
-                            displayDate.setDate(displayDate.getDate() - 1);
+                            // Attribute to the day you went to sleep
+                            const displayDate = new Date(sleepTime);
                             const dateLabel = displayDate.toLocaleDateString('en-US', {month: 'short', day: 'numeric', weekday: 'short'});
 
                             const item = document.createElement('div');
@@ -163,11 +163,14 @@
                             item.innerHTML = `
                                 <div style="display:flex; flex-direction:column;">
                                     <span style="font-weight:600;">${dateLabel}</span>
-                                    <span style="font-size:0.7rem; opacity:0.6;">Up at ${wakeTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                                    <span style="font-size:0.7rem; opacity:0.6;">Woke at ${wakeTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
                                 </div>
                                 <span class="history-hours">${duration.toFixed(1)} hrs</span>
                             `;
                             list.appendChild(item);
+                            
+                            // Advance index to avoid double-counting
+                            i = data.indexOf(sleepEntry);
                         }
                     }
                 }
