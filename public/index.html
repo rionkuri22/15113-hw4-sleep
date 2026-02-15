@@ -114,27 +114,25 @@
             actionBtn.disabled = true;
 
             try {
-                // Post the log and wait for database confirmation
                 const res = await fetch(`/api/log?event_type=${nextType}&offset_minutes=${offset}`, { method: 'POST' });
-                const result = await res.json();
-                if (!res.ok) throw new Error(result.message);
+                if (!res.ok) throw new Error("Sync failed");
 
-                // Update UI theme immediately after success
+                // CRITICAL: Switch UI mode immediately
                 updateUI(nextType);
 
                 if (nextType === 'wake') {
-                    // Fetch fresh history to get the paired timestamps
+                    // Give the DB a moment to finalize the entry
+                    await new Promise(r => setTimeout(r, 400));
                     const histRes = await fetch('/api/history');
                     const history = await histRes.json();
                     
-                    // Match the wake we just logged with the previous sleep
                     const currentWake = history[0]; 
                     const prevSleep = history.find((h, i) => i > 0 && h.type === 'sleep');
 
                     if (currentWake && prevSleep) {
-                        const wakeTime = new Date(currentWake.time);
-                        const sleepTime = new Date(prevSleep.time);
-                        const diff = (wakeTime - sleepTime) / (1000 * 60 * 60);
+                        const wakeTime = currentWake.timestamp;
+                        const sleepTime = prevSleep.timestamp;
+                        const diff = (wakeTime - sleepTime) / 3600;
                         
                         feedbackDiv.innerText = `Slept ${formatDuration(diff)}!`;
                         actionBtn.style.display = 'none';
@@ -153,7 +151,7 @@
                 document.getElementById('time-offset').value = 0;
                 document.getElementById('offset-val').innerText = 0;
             } catch (err) {
-                statusDiv.innerText = "Error: " + err.message;
+                statusDiv.innerText = "Error!";
             } finally {
                 actionBtn.disabled = false;
             }
@@ -170,13 +168,12 @@
                 if (data[i].type === 'wake') {
                     const sleepEntry = data.slice(i + 1).find(entry => entry.type === 'sleep');
                     if (sleepEntry) {
-                        const wakeTime = new Date(data[i].time);
-                        const sleepTime = new Date(sleepEntry.time);
-                        const duration = (wakeTime - sleepTime) / (1000 * 60 * 60);
+                        const wakeTime = new Date(data[i].timestamp * 1000);
+                        const sleepTime = new Date(sleepEntry.timestamp * 1000);
+                        const diffHours = (data[i].timestamp - sleepEntry.timestamp) / 3600;
 
-                        if (duration > 0.02) {
-                            const displayDate = new Date(sleepTime);
-                            const dateLabel = displayDate.toLocaleDateString('en-US', {month: 'short', day: 'numeric', weekday: 'short'});
+                        if (diffHours > 0.02) {
+                            const dateLabel = sleepTime.toLocaleDateString('en-US', {month: 'short', day: 'numeric', weekday: 'short'});
 
                             const item = document.createElement('div');
                             item.className = 'history-item';
@@ -188,7 +185,7 @@
                                         ${wakeTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
                                     </span>
                                 </div>
-                                <span class="history-hours">${formatDuration(duration)}</span>
+                                <span class="history-hours">${formatDuration(diffHours)}</span>
                             `;
                             list.appendChild(item);
                             i = data.indexOf(sleepEntry) + 1;

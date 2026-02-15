@@ -11,7 +11,6 @@ app = FastAPI()
 
 @app.get("/api/state")
 def get_last_state():
-    """Returns the last event to set the UI theme"""
     try:
         conn = psycopg2.connect(DATABASE_URL)
         cur = conn.cursor()
@@ -25,7 +24,6 @@ def get_last_state():
 
 @app.get("/api/history")
 def get_history():
-    """Returns logs for duration calculation"""
     try:
         conn = psycopg2.connect(DATABASE_URL)
         cur = conn.cursor()
@@ -33,16 +31,15 @@ def get_history():
         rows = cur.fetchall()
         cur.close()
         conn.close()
-        return [{"type": r[0], "time": r[1].isoformat()} for r in rows]
+        # Change: Send a Unix timestamp (seconds) to avoid ISO parsing bugs
+        return [{"type": r[0], "timestamp": r[1].replace(tzinfo=timezone.utc).timestamp()} for r in rows]
     except Exception as e:
         return {"error": str(e)}
 
 @app.post("/api/log")
 async def log_event(event_type: str, offset_minutes: int = 0):
-    """Logs event with UTC and integer offset applied server-side"""
     try:
         now_utc = datetime.now(timezone.utc)
-        # Apply the offset to the timestamp before saving
         actual_time = now_utc - timedelta(minutes=int(offset_minutes))
         
         conn = psycopg2.connect(DATABASE_URL)
@@ -54,6 +51,6 @@ async def log_event(event_type: str, offset_minutes: int = 0):
         conn.commit()
         cur.close()
         conn.close()
-        return {"status": "success", "logged_at": actual_time.isoformat()}
+        return {"status": "success"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
