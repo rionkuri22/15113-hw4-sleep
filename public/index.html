@@ -27,7 +27,7 @@
         h1 { font-size: 2.2rem; margin-bottom: 5px; }
         #live-date { font-size: 1.1rem; opacity: 0.9; margin-bottom: 10px; font-weight: 500; }
         
-        /* Default: Hidden */
+        /* Duration Text - Forced Visibility with !important */
         #duration-feedback { 
             font-size: 1.8rem; 
             font-weight: 800; 
@@ -50,8 +50,7 @@
         .history-item { border-bottom: 1px solid rgba(255,255,255,0.1); padding: 15px 0; display: flex; justify-content: space-between; align-items: center; }
         .history-hours { font-weight: 800; font-size: 1.2rem; min-width: 80px; text-align: right; }
         
-        /* FEEDBACK MODE OVERRIDES - FORCE VISIBILITY */
-        /* Use !important to override any JS inline styles or default theme hiding */
+        /* FEEDBACK MODE: Hide Button, Show Text */
         .feedback-mode #action-btn { display: none !important; }
         .feedback-mode #duration-feedback { display: block !important; }
         .feedback-mode .override-section { opacity: 0; pointer-events: none; }
@@ -113,22 +112,18 @@
 
         function updateUI(lastEvent) {
             currentState = lastEvent;
-            // Clean up feedback mode
             mainView.classList.remove('feedback-mode');
-            statusDiv.innerText = ""; // Clear instruction text
+            statusDiv.innerText = ""; // Clear any lingering text
 
             if (lastEvent === 'sleep') {
-                // Currently Sleeping -> Button shows "Rise & Shine"
-                document.body.className = 'mode-wake'; 
+                document.body.className = 'mode-wake';
                 actionBtn.innerText = "☀️ Rise & Shine";
                 actionBtn.style.display = 'block';
             } else {
-                // Currently Awake -> Button shows "Clocking Out"
                 document.body.className = 'mode-sleep';
                 actionBtn.innerText = "🌙 Clocking Out";
                 actionBtn.style.display = 'block';
             }
-            // Ensure feedback is hidden during normal operation
             feedbackDiv.style.display = 'none';
         }
 
@@ -140,7 +135,7 @@
             actionBtn.disabled = true;
 
             try {
-                // Save data with a timestamp to prevent caching
+                // Add timestamp ?t= to prevent caching
                 const res = await fetch(`/api/log?event_type=${nextType}&offset_minutes=${offset}&t=${Date.now()}`, { method: 'POST' });
                 const data = await res.json();
                 
@@ -150,21 +145,20 @@
 
                 if (nextType === 'wake') {
                     // --- WAKE UP LOGIC ---
-                    // 1. Enter Feedback Mode
+                    // 1. Force the UI into Feedback Mode
                     mainView.classList.add('feedback-mode');
                     
-                    // 2. Set the yellow text
-                    if (data.duration !== null && data.duration !== undefined) {
+                    // 2. Display the yellow duration text
+                    if (data.duration !== null) {
                         feedbackDiv.innerText = `You slept for ${formatDuration(data.duration)}`;
                     } else {
-                        // Fallback if this is the very first log and no sleep exists
                         feedbackDiv.innerText = "Rise & Shine!";
                     }
 
-                    // 3. Instruction to continue
+                    // 3. Show instruction
                     statusDiv.innerText = "Tap screen to continue";
                     
-                    // 4. Wait for user tap to flip the theme
+                    // 4. Wait for user tap
                     const proceedToNextState = () => {
                         updateUI(nextType); 
                         document.body.removeEventListener('click', proceedToNextState);
@@ -176,7 +170,6 @@
 
                 } else {
                     // --- SLEEP LOGIC ---
-                    // Just flip immediately
                     updateUI(nextType);
                 }
 
@@ -185,7 +178,7 @@
 
             } catch (err) {
                 statusDiv.innerText = "Error: " + err.message;
-                updateUI(currentState); // Revert on error
+                updateUI(currentState);
             } finally {
                 actionBtn.disabled = false;
             }
@@ -197,16 +190,20 @@
             const list = document.getElementById('history-list');
             list.innerHTML = '';
 
-            // Sort Oldest -> Newest
+            // Sort Oldest -> Newest (Chronological)
             const events = data.sort((a, b) => a.timestamp - b.timestamp);
             const sessions = [];
             let currentSleepStart = null;
 
+            // Build sessions by pairing events strictly
             for (let ev of events) {
                 if (ev.type === 'sleep') {
-                    // Always capture the earliest sleep start of a session
+                    // Start of a sleep session
+                    // If we see another sleep before a wake, we assume the previous one was a mistake/reset 
+                    // and take this new start time (or you could chose to ignore it, but taking latest usually feels more natural for corrections)
                     if (currentSleepStart === null) currentSleepStart = ev.timestamp;
                 } else if (ev.type === 'wake') {
+                    // End of a sleep session
                     if (currentSleepStart !== null) {
                         const diff = (ev.timestamp - currentSleepStart) / 3600;
                         sessions.push({ start: currentSleepStart, end: ev.timestamp, duration: diff });
@@ -218,7 +215,7 @@
             if (sessions.length === 0) {
                 list.innerHTML = "<div style='opacity:0.6; margin-top:10px'>No sessions found.</div>";
             } else {
-                // Show Newest -> Oldest
+                // Render Newest -> Oldest
                 sessions.reverse().forEach(session => {
                     const sleepTime = new Date(session.start * 1000);
                     const wakeTime = new Date(session.end * 1000);

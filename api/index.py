@@ -35,6 +35,7 @@ def get_history():
         rows = cur.fetchall()
         cur.close()
         conn.close()
+        # Return timestamps (seconds) for accurate JS math
         return [{"id": r[0], "type": r[1], "timestamp": r[2].replace(tzinfo=timezone.utc).timestamp()} for r in rows]
     except Exception as e:
         return {"error": str(e)}
@@ -43,24 +44,23 @@ def get_history():
 async def log_event(event_type: str, offset_minutes: int = 0):
     try:
         now_utc = datetime.now(timezone.utc)
-        # Calculate the actual time based on user offset
+        # Calculate the actual time (applying the 'Forgot' slider)
         actual_time = now_utc - timedelta(minutes=int(offset_minutes))
         
         conn = get_db_connection()
         cur = conn.cursor()
         
-        # ALWAYS INSERT a new row. No updating/merging.
-        # This ensures every nap/test is recorded separately.
+        # ALWAYS INSERT. Never update. This ensures every nap is a separate row.
         cur.execute(
             "INSERT INTO sleep_events (event_type, created_at) VALUES (%s, %s)",
             (event_type, actual_time)
         )
         conn.commit()
 
-        # Calculate duration if this is a wake event
+        # Calculate duration immediately on the server for accuracy
         duration_hours = None
         if event_type == "wake":
-            # Find the most recent sleep that happened BEFORE this wake time
+            # Find the sleep that happened just before this wake
             cur.execute("""
                 SELECT created_at FROM sleep_events 
                 WHERE event_type = 'sleep' AND created_at < %s 
