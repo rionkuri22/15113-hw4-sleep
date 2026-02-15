@@ -27,10 +27,11 @@
         h1 { font-size: 2.2rem; margin-bottom: 5px; }
         #live-date { font-size: 1.1rem; opacity: 0.9; margin-bottom: 10px; font-weight: 500; }
         
-        /* Fixed: Duration feedback specifically styled for Rise & Shine view */
+        /* The Duration Feedback styling */
         #duration-feedback { font-size: 1.3rem; font-weight: 800; margin-bottom: 20px; min-height: 1.6rem; color: #1a237e; }
-        .mode-sleep #duration-feedback { display: none; } /* Hide when it's time to sleep */
-        
+        /* ONLY show duration feedback when the body is in mode-wake (Daytime) */
+        body.mode-sleep #duration-feedback { display: none; } 
+
         button.btn-main { width: 100%; padding: 25px; font-size: 1.4rem; font-weight: 700; border: none; border-radius: 50px; cursor: pointer; transition: 0.2s; }
         .mode-sleep .btn-main { background: #1a237e; color: white; }
         .mode-wake .btn-main { background: white; color: #f57c00; }
@@ -90,14 +91,14 @@
         function updateUI(lastEvent) {
             currentState = lastEvent;
             if (lastEvent === 'sleep') {
-                // We are currently "Asleep" -> Show Rise & Shine
+                // LAST action was sleep -> We are currently sleeping -> Show WAKE button
                 document.body.className = 'mode-wake';
                 actionBtn.innerText = "☀️ Rise & Shine";
             } else {
-                // We are currently "Awake" -> Show Clocking Out
+                // LAST action was wake -> We are currently awake -> Show SLEEP button
                 document.body.className = 'mode-sleep';
                 actionBtn.innerText = "🌙 Clocking Out";
-                feedbackDiv.innerText = ""; // Clear feedback for the next day
+                feedbackDiv.innerText = ""; // Clear duration text for next cycle
             }
         }
 
@@ -106,7 +107,7 @@
             const nextType = currentState === 'sleep' ? 'wake' : 'sleep';
             const previousState = currentState;
 
-            // Optimistic UI Update
+            // OPTIMISTIC UPDATE: Move to next state immediately
             updateUI(nextType);
             statusDiv.innerText = "Saving...";
 
@@ -118,20 +119,21 @@
                 document.getElementById('time-offset').value = 0;
                 document.getElementById('offset-val').innerText = 0;
 
-                // Duration Calculation Logic
+                // If we just clicked Wake Up, calculate the duration
                 if (nextType === 'wake') {
-                    // Small delay to ensure Neon is updated
+                    // Small delay to let Neon write finish
                     setTimeout(async () => {
                         const histRes = await fetch('/api/history');
                         const history = await histRes.json();
                         
-                        // Find the wake event we just created and its matching sleep
+                        // Find the wake event we just logged and its previous sleep
                         const wakeObj = history.find(h => h.type === 'wake');
                         const sleepObj = history.slice(history.indexOf(wakeObj) + 1).find(h => h.type === 'sleep');
                         
                         if (wakeObj && sleepObj) {
                             const diff = (new Date(wakeObj.time) - new Date(sleepObj.time)) / (1000 * 60 * 60);
                             if (diff > 0) {
+                                // Show duration on the WAKE page
                                 feedbackDiv.innerText = `Slept ${diff.toFixed(1)} hours!`;
                             }
                         }
@@ -139,7 +141,7 @@
                 }
             } catch (err) {
                 updateUI(previousState);
-                statusDiv.innerText = "Failed. Check internet.";
+                statusDiv.innerText = "Sync failed.";
             }
         }
 
@@ -159,8 +161,9 @@
                         const duration = (wakeTime - sleepTime) / (1000 * 60 * 60);
 
                         if (duration > 0.08) {
-                            // Date attribution: Show the date you started sleeping
-                            const displayDate = new Date(sleepTime);
+                            // Date logic: Subtract 1 day from wake date
+                            const displayDate = new Date(wakeTime);
+                            displayDate.setDate(displayDate.getDate() - 1);
                             const dateLabel = displayDate.toLocaleDateString('en-US', {month: 'short', day: 'numeric', weekday: 'short'});
 
                             const item = document.createElement('div');
@@ -173,7 +176,7 @@
                                 <span class="history-hours">${duration.toFixed(1)} hrs</span>
                             `;
                             list.appendChild(item);
-                            i = data.indexOf(sleepEntry); // Skip to the next pair
+                            i = data.indexOf(sleepEntry);
                         }
                     }
                 }

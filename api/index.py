@@ -25,7 +25,7 @@ def get_last_state():
 
 @app.get("/api/history")
 def get_history():
-    """Returns logs for history and duration calculation"""
+    """Returns logs for duration calculation"""
     try:
         conn = psycopg2.connect(DATABASE_URL)
         cur = conn.cursor()
@@ -41,7 +41,6 @@ def get_history():
 async def log_event(event_type: str, offset_minutes: int = 0):
     """Logs event with UTC and integer offset"""
     try:
-        # Strict integer conversion for the offset
         now_utc = datetime.now(timezone.utc)
         actual_time = now_utc - timedelta(minutes=int(offset_minutes))
         
