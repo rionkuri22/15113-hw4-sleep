@@ -191,4 +191,32 @@
                                         ${wakeTime.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
                                     </span>
                                 </div>
-                                <span class="history-hours">${formatDuration(duration)}
+                                <span class="history-hours">${formatDuration(duration)}</span>
+                            `;
+                            list.appendChild(item);
+                            i = data.indexOf(sleepEntry) + 1;
+                            continue;
+                        }
+                    }
+                    i++;
+                }
+            } catch (e) {
+                document.getElementById('history-list').innerText = "History unavailable.";
+            }
+        }
+
+        window.onload = async () => {
+            updateDate();
+            try {
+                const res = await fetch('/api/state');
+                const data = await res.json();
+                updateUI(data.last_event);
+                statusDiv.innerText = "Ready";
+            } catch (err) {
+                updateUI('wake');
+                statusDiv.innerText = "Offline";
+            }
+        };
+    </script>
+</body>
+</html>
