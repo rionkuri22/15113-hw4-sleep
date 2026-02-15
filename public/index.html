@@ -26,8 +26,10 @@
         .nav-btn { position: absolute; top: 25px; right: 25px; background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.3); color: inherit; padding: 8px 18px; font-size: 0.8rem; border-radius: 12px; cursor: pointer; }
         h1 { font-size: 2.2rem; margin-bottom: 5px; }
         #live-date { font-size: 1.1rem; opacity: 0.9; margin-bottom: 10px; font-weight: 500; }
-        #duration-feedback { font-size: 1.3rem; font-weight: 800; margin-bottom: 20px; color: #1a237e; min-height: 1.6rem; }
-        .mode-sleep #duration-feedback { color: #FFCC33; }
+        
+        /* Fixed: Duration feedback specifically styled for Rise & Shine view */
+        #duration-feedback { font-size: 1.3rem; font-weight: 800; margin-bottom: 20px; min-height: 1.6rem; color: #1a237e; }
+        .mode-sleep #duration-feedback { display: none; } /* Hide when it's time to sleep */
         
         button.btn-main { width: 100%; padding: 25px; font-size: 1.4rem; font-weight: 700; border: none; border-radius: 50px; cursor: pointer; transition: 0.2s; }
         .mode-sleep .btn-main { background: #1a237e; color: white; }
@@ -88,12 +90,14 @@
         function updateUI(lastEvent) {
             currentState = lastEvent;
             if (lastEvent === 'sleep') {
+                // We are currently "Asleep" -> Show Rise & Shine
                 document.body.className = 'mode-wake';
                 actionBtn.innerText = "☀️ Rise & Shine";
             } else {
+                // We are currently "Awake" -> Show Clocking Out
                 document.body.className = 'mode-sleep';
                 actionBtn.innerText = "🌙 Clocking Out";
-                feedbackDiv.innerText = ""; 
+                feedbackDiv.innerText = ""; // Clear feedback for the next day
             }
         }
 
@@ -102,8 +106,9 @@
             const nextType = currentState === 'sleep' ? 'wake' : 'sleep';
             const previousState = currentState;
 
+            // Optimistic UI Update
             updateUI(nextType);
-            statusDiv.innerText = "Saving to Neon...";
+            statusDiv.innerText = "Saving...";
 
             try {
                 const res = await fetch(`/api/log?event_type=${nextType}&offset_minutes=${offset}`, { method: 'POST' });
@@ -113,19 +118,20 @@
                 document.getElementById('time-offset').value = 0;
                 document.getElementById('offset-val').innerText = 0;
 
+                // Duration Calculation Logic
                 if (nextType === 'wake') {
-                    // Give Neon time to process the write
+                    // Small delay to ensure Neon is updated
                     setTimeout(async () => {
                         const histRes = await fetch('/api/history');
                         const history = await histRes.json();
                         
-                        // Robust Pairing: Find the wake and the sleep that happened before it
+                        // Find the wake event we just created and its matching sleep
                         const wakeObj = history.find(h => h.type === 'wake');
                         const sleepObj = history.slice(history.indexOf(wakeObj) + 1).find(h => h.type === 'sleep');
                         
                         if (wakeObj && sleepObj) {
                             const diff = (new Date(wakeObj.time) - new Date(sleepObj.time)) / (1000 * 60 * 60);
-                            if (diff > 0.05) {
+                            if (diff > 0) {
                                 feedbackDiv.innerText = `Slept ${diff.toFixed(1)} hours!`;
                             }
                         }
@@ -133,7 +139,7 @@
                 }
             } catch (err) {
                 updateUI(previousState);
-                statusDiv.innerText = "Sync failed.";
+                statusDiv.innerText = "Failed. Check internet.";
             }
         }
 
@@ -145,7 +151,6 @@
 
             for (let i = 0; i < data.length; i++) {
                 if (data[i].type === 'wake') {
-                    // Find the sleep event that matches this wake
                     const sleepEntry = data.slice(i + 1).find(entry => entry.type === 'sleep');
                     
                     if (sleepEntry) {
@@ -154,7 +159,7 @@
                         const duration = (wakeTime - sleepTime) / (1000 * 60 * 60);
 
                         if (duration > 0.08) {
-                            // Attribute to the day you went to sleep
+                            // Date attribution: Show the date you started sleeping
                             const displayDate = new Date(sleepTime);
                             const dateLabel = displayDate.toLocaleDateString('en-US', {month: 'short', day: 'numeric', weekday: 'short'});
 
@@ -163,14 +168,12 @@
                             item.innerHTML = `
                                 <div style="display:flex; flex-direction:column;">
                                     <span style="font-weight:600;">${dateLabel}</span>
-                                    <span style="font-size:0.7rem; opacity:0.6;">Woke at ${wakeTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                                    <span style="font-size:0.7rem; opacity:0.6;">Up at ${wakeTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
                                 </div>
                                 <span class="history-hours">${duration.toFixed(1)} hrs</span>
                             `;
                             list.appendChild(item);
-                            
-                            // Advance index to avoid double-counting
-                            i = data.indexOf(sleepEntry);
+                            i = data.indexOf(sleepEntry); // Skip to the next pair
                         }
                     }
                 }
