@@ -42,6 +42,7 @@ async def log_event(event_type: str, offset_minutes: int = 0):
     """Logs event with UTC and integer offset"""
     try:
         now_utc = datetime.now(timezone.utc)
+        # Correctly apply the retrospective offset
         actual_time = now_utc - timedelta(minutes=int(offset_minutes))
         
         conn = psycopg2.connect(DATABASE_URL)

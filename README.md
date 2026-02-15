@@ -8,8 +8,8 @@ A sleep-tracking web application designed specifically for individuals with irre
 
 ### Technical details
 About the tech stack
-- Frontend: HTML/CSS/JavaScript
-- Backend: Python (in folder called "API) using FastAPI
+- Frontend: HTML/CSS/JavaScript (in "public" folder)
+- Backend: Python (in "api" folder) using FastAPI
 - Database: Neon 
 - Deployment: Vercel
 

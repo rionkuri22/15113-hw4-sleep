@@ -27,9 +27,7 @@
         h1 { font-size: 2.2rem; margin-bottom: 5px; }
         #live-date { font-size: 1.1rem; opacity: 0.9; margin-bottom: 10px; font-weight: 500; }
         
-        /* The Duration Feedback styling */
         #duration-feedback { font-size: 1.3rem; font-weight: 800; margin-bottom: 20px; min-height: 1.6rem; color: #1a237e; }
-        /* ONLY show duration feedback when the body is in mode-wake (Daytime) */
         body.mode-sleep #duration-feedback { display: none; } 
 
         button.btn-main { width: 100%; padding: 25px; font-size: 1.4rem; font-weight: 700; border: none; border-radius: 50px; cursor: pointer; transition: 0.2s; }
@@ -108,28 +106,27 @@
             const nextType = currentState === 'sleep' ? 'wake' : 'sleep';
             const previousState = currentState;
 
-            // OPTIMISTIC UPDATE: Move to next state immediately
             updateUI(nextType);
             statusDiv.innerText = "Saving...";
 
-            // If we just clicked Wake Up, calculate the duration immediately using the last two events
             if (nextType === 'wake') {
-                // Fetch history to get the last sleep event and its offset
                 try {
                     const histRes = await fetch('/api/history');
                     const history = await histRes.json();
-                    // Find the most recent sleep event before this wake
-                    const sleepIdx = history.findIndex(h => h.type === 'sleep');
-                    const wakeTime = new Date();
-                    if (sleepIdx !== -1) {
-                        const sleepObj = history[sleepIdx];
+                    
+                    // Find the most recent sleep event
+                    const sleepObj = history.find(h => h.type === 'sleep');
+                    
+                    // Calculate "Now" accounting for the offset selected
+                    const wakeTimeWithOffset = new Date(Date.now() - (offset * 60000));
+
+                    if (sleepObj) {
                         const sleepTime = new Date(sleepObj.time);
-                        const diff = (wakeTime - sleepTime) / (1000 * 60 * 60);
+                        const diff = (wakeTimeWithOffset - sleepTime) / (1000 * 60 * 60);
+                        
                         if (diff > 0) {
                             feedbackDiv.innerText = `Slept ${diff.toFixed(1)} hours!`;
-                            feedbackDiv.style.display = '';
                             actionBtn.style.display = 'none';
-                            // Add a one-time click handler to the card to reset UI
                             const card = document.querySelector('.glass-card');
                             const proceedToNextDay = () => {
                                 updateUI('wake');
@@ -139,12 +136,10 @@
                             };
                             setTimeout(() => {
                                 card.addEventListener('click', proceedToNextDay);
-                            }, 100); // slight delay to avoid immediate trigger
+                            }, 100);
                         }
                     }
                 } catch (e) {
-                    // fallback: just show the button
-                    feedbackDiv.innerText = '';
                     actionBtn.style.display = '';
                 }
             }
@@ -167,8 +162,11 @@
             const list = document.getElementById('history-list');
             list.innerHTML = '';
 
-            for (let i = 0; i < data.length; i++) {
+            let i = 0;
+            while (i < data.length) {
+                // Find a wake event to start a pair
                 if (data[i].type === 'wake') {
+                    // Look for the immediate next 'sleep' event in the past logs
                     const sleepEntry = data.slice(i + 1).find(entry => entry.type === 'sleep');
                     
                     if (sleepEntry) {
@@ -176,10 +174,9 @@
                         const sleepTime = new Date(sleepEntry.time);
                         const duration = (wakeTime - sleepTime) / (1000 * 60 * 60);
 
-                        if (duration > 0.08) {
-                            // Date logic: Subtract 1 day from wake date
-                            const displayDate = new Date(wakeTime);
-                            displayDate.setDate(displayDate.getDate() - 1);
+                        // Threshold: skip very short accidental logs
+                        if (duration > 0.05) {
+                            const displayDate = new Date(sleepTime);
                             const dateLabel = displayDate.toLocaleDateString('en-US', {month: 'short', day: 'numeric', weekday: 'short'});
 
                             const item = document.createElement('div');
@@ -187,15 +184,22 @@
                             item.innerHTML = `
                                 <div style="display:flex; flex-direction:column;">
                                     <span style="font-weight:600;">${dateLabel}</span>
-                                    <span style="font-size:0.7rem; opacity:0.6;">Up at ${wakeTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                                    <span style="font-size:0.7rem; opacity:0.6;">
+                                        ${sleepTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} - 
+                                        ${wakeTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                                    </span>
                                 </div>
                                 <span class="history-hours">${duration.toFixed(1)} hrs</span>
                             `;
                             list.appendChild(item);
-                            i = data.indexOf(sleepEntry);
+                            
+                            // Move the index to start searching AFTER this sleep entry
+                            i = data.indexOf(sleepEntry) + 1;
+                            continue;
                         }
                     }
                 }
+                i++;
             }
         }
 
