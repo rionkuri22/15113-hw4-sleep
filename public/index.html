@@ -9,7 +9,7 @@
             --day-gradient: linear-gradient(180deg, #FFB347 0%, #FFCC33 100%);
             --night-gradient: radial-gradient(circle at top right, #283593, #121212);
         }
-        body { margin: 0; height: 100vh; display: flex; align-items: center; justify-content: center; font-family: 'Inter', sans-serif; transition: background 1.2s cubic-bezier(0.4, 0, 0.2, 1); overflow: hidden; }
+        body { margin: 0; height: 100vh; display: flex; align-items: center; justify-content: center; font-family: 'Inter', sans-serif; transition: background 1.2s; overflow: hidden; }
         body.mode-wake { background: var(--day-gradient); color: #4e342e; }
         body.mode-sleep { background: var(--night-gradient); color: white; }
         
@@ -18,14 +18,17 @@
             backdrop-filter: blur(25px); -webkit-backdrop-filter: blur(25px); 
             border: 1px solid rgba(255, 255, 255, 0.2); 
             padding: 40px; border-radius: 40px; 
-            width: 85%; max-width: 450px; min-height: 50vh; 
+            width: 85%; max-width: 450px; 
+            min-height: 50vh; 
             box-shadow: 0 20px 50px rgba(0,0,0,0.3); 
             position: relative; display: flex; flex-direction: column; justify-content: center;
         }
         
         .nav-btn { position: absolute; top: 25px; right: 25px; background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.3); color: inherit; padding: 8px 18px; font-size: 0.8rem; border-radius: 12px; cursor: pointer; }
         h1 { font-size: 2.2rem; margin-bottom: 5px; }
-        #live-date { font-size: 1.1rem; opacity: 0.9; margin-bottom: 30px; font-weight: 500; }
+        #live-date { font-size: 1.1rem; opacity: 0.9; margin-bottom: 10px; font-weight: 500; }
+        #duration-feedback { font-size: 1.2rem; font-weight: 700; margin-bottom: 20px; min-height: 1.5rem; color: #1a237e; }
+        .mode-sleep #duration-feedback { color: #FFCC33; }
         
         button.btn-main { width: 100%; padding: 25px; font-size: 1.4rem; font-weight: 700; border: none; border-radius: 50px; cursor: pointer; transition: 0.2s; }
         .mode-sleep .btn-main { background: #1a237e; color: white; }
@@ -35,7 +38,7 @@
         input[type=range] { width: 100%; margin-top: 10px; }
         #status { margin-top: 15px; font-size: 0.7rem; opacity: 0.6; }
         
-        #history-view { display: none; text-align: left; }
+        #history-view { display: none; text-align: left; max-height: 40vh; overflow-y: auto; }
         .history-item { border-bottom: 1px solid rgba(255,255,255,0.1); padding: 15px 0; display: flex; justify-content: space-between; align-items: center; }
         .history-hours { font-weight: 800; font-size: 1.2rem; }
     </style>
@@ -47,7 +50,7 @@
         <div id="main-view">
             <h1>Hello, Rion</h1>
             <div id="live-date">...</div>
-            <button id="action-btn" class="btn-main" onclick="sendLog()">...</button>
+            <div id="duration-feedback"></div> <button id="action-btn" class="btn-main" onclick="sendLog()">...</button>
             <div class="override-section">
                 <label>Forgot? <span id="offset-val">0</span> mins ago</label>
                 <input type="range" id="time-offset" min="0" max="120" value="0" oninput="document.getElementById('offset-val').innerText = this.value">
@@ -56,7 +59,7 @@
         </div>
 
         <div id="history-view">
-            <h2 style="margin:0 0 20px 0">Sleep History</h2>
+            <h2 style="margin:0 0 10px 0">Sleep History</h2>
             <div id="history-list">Analyzing logs...</div>
         </div>
     </div>
@@ -64,6 +67,7 @@
     <script>
         let currentState = 'wake';
         const actionBtn = document.getElementById('action-btn');
+        const feedbackDiv = document.getElementById('duration-feedback');
 
         function updateDate() {
             const now = new Date();
@@ -90,6 +94,7 @@
             } else {
                 document.body.className = 'mode-sleep';
                 actionBtn.innerText = "🌙 Clocking Out";
+                feedbackDiv.innerText = ""; // Clear feedback when going to sleep
             }
         }
 
@@ -98,19 +103,32 @@
             const nextType = currentState === 'sleep' ? 'wake' : 'sleep';
             const previousState = currentState;
 
-            // Optimistic UI Update
+            // Optimistic Update
             updateUI(nextType);
-            document.getElementById('status').innerText = "Updating Singapore...";
+            document.getElementById('status').innerText = "Syncing...";
 
             try {
                 const res = await fetch(`/api/log?event_type=${nextType}&offset_minutes=${offset}`, { method: 'POST' });
                 if (!res.ok) throw new Error();
+                
                 document.getElementById('status').innerText = "Logged!";
                 document.getElementById('time-offset').value = 0;
                 document.getElementById('offset-val').innerText = 0;
+
+                // If we just woke up, show how long we slept
+                if (nextType === 'wake') {
+                    const histRes = await fetch('/api/history');
+                    const history = await histRes.json();
+                    if (history.length >= 2 && history[1].type === 'sleep') {
+                        const wakeTime = new Date(history[0].time);
+                        const sleepTime = new Date(history[1].time);
+                        const duration = (wakeTime - sleepTime) / (1000 * 60 * 60);
+                        feedbackDiv.innerText = `You slept for ${duration.toFixed(1)} hours!`;
+                    }
+                }
             } catch (err) {
-                updateUI(previousState); // Revert on error
-                document.getElementById('status').innerText = "Failed to Sync.";
+                updateUI(previousState);
+                document.getElementById('status').innerText = "Sync failed.";
             }
         }
 
@@ -119,25 +137,33 @@
             const data = await res.json();
             const list = document.getElementById('history-list');
             list.innerHTML = '';
-            const dailyTotals = {};
 
             for (let i = 0; i < data.length - 1; i++) {
-                if (data[i].type === 'wake' && data[i+1].type === 'sleep') {
-                    const wake = new Date(data[i].time);
-                    const sleep = new Date(data[i+1].time);
-                    const diffHrs = (wake - sleep) / (1000 * 60 * 60);
-                    if (diffHrs > 0.05) {
-                        const dateKey = wake.toLocaleDateString('en-US', {month:'short', day:'numeric'});
-                        dailyTotals[dateKey] = (dailyTotals[dateKey] || 0) + diffHrs;
+                const current = data[i];
+                const next = data[i+1];
+
+                if (current.type === 'wake' && next.type === 'sleep') {
+                    const wakeTime = new Date(current.time);
+                    const sleepTime = new Date(next.time);
+                    const duration = (wakeTime - sleepTime) / (1000 * 60 * 60);
+
+                    if (duration > 0.08) {
+                        const displayDate = new Date(wakeTime);
+                        displayDate.setDate(displayDate.getDate() - 1);
+                        const dateLabel = displayDate.toLocaleDateString('en-US', {month: 'short', day: 'numeric', weekday: 'short'});
+
+                        const item = document.createElement('div');
+                        item.className = 'history-item';
+                        item.innerHTML = `
+                            <div style="display:flex; flex-direction:column;">
+                                <span style="font-weight:600;">${dateLabel}</span>
+                                <span style="font-size:0.7rem; opacity:0.6;">Up at ${wakeTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                            </div>
+                            <span class="history-hours">${duration.toFixed(1)} hrs</span>
+                        `;
+                        list.appendChild(item);
                     }
                 }
-            }
-
-            for (const [date, total] of Object.entries(dailyTotals)) {
-                const item = document.createElement('div');
-                item.className = 'history-item';
-                item.innerHTML = `<span>${date}</span><span class="history-hours">${total.toFixed(1)} hrs</span>`;
-                list.appendChild(item);
             }
         }
 
