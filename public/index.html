@@ -40,7 +40,7 @@
         
         #history-view { display: none; text-align: left; max-height: 40vh; overflow-y: auto; }
         .history-item { border-bottom: 1px solid rgba(255,255,255,0.1); padding: 15px 0; display: flex; justify-content: space-between; align-items: center; }
-        .history-hours { font-weight: 800; font-size: 1.2rem; }
+        .history-hours { font-weight: 800; font-size: 1.2rem; min-width: 80px; text-align: right; }
     </style>
 </head>
 <body class="mode-sleep">
@@ -59,7 +59,7 @@
         </div>
         <div id="history-view">
             <h2 style="margin:0 0 10px 0">Sleep History</h2>
-            <div id="history-list">Analyzing logs...</div>
+            <div id="history-list">Loading...</div>
         </div>
     </div>
 
@@ -76,6 +76,7 @@
         }
 
         function formatDuration(decimalHours) {
+            if (!decimalHours) return "0m";
             const totalMinutes = Math.round(decimalHours * 60);
             const h = Math.floor(totalMinutes / 60);
             const m = totalMinutes % 60;
@@ -114,51 +115,48 @@
             actionBtn.disabled = true;
 
             try {
+                // Post to server
                 const res = await fetch(`/api/log?event_type=${nextType}&offset_minutes=${offset}`, { method: 'POST' });
-                if (!res.ok) throw new Error("Sync failed");
+                const data = await res.json();
+                
+                if (data.status === 'error') throw new Error(data.message);
 
-                // CRITICAL: Switch UI mode immediately
+                // Update UI based on success
                 updateUI(nextType);
+                statusDiv.innerText = "Saved!";
 
-                if (nextType === 'wake') {
-                    // Give the DB a moment to finalize the entry
-                    await new Promise(r => setTimeout(r, 400));
-                    const histRes = await fetch('/api/history');
-                    const history = await histRes.json();
+                // If we just woke up, use the duration calculated by the server
+                if (nextType === 'wake' && data.duration !== null) {
+                    feedbackDiv.innerText = `Slept ${formatDuration(data.duration)}!`;
+                    actionBtn.style.display = 'none';
                     
-                    const currentWake = history[0]; 
-                    const prevSleep = history.find((h, i) => i > 0 && h.type === 'sleep');
-
-                    if (currentWake && prevSleep) {
-                        const wakeTime = currentWake.timestamp;
-                        const sleepTime = prevSleep.timestamp;
-                        const diff = (wakeTime - sleepTime) / 3600;
-                        
-                        feedbackDiv.innerText = `Slept ${formatDuration(diff)}!`;
-                        actionBtn.style.display = 'none';
-
-                        const card = document.querySelector('.glass-card');
-                        const resetUI = () => {
-                            feedbackDiv.innerText = '';
-                            actionBtn.style.display = '';
-                            card.removeEventListener('click', resetUI);
-                        };
-                        setTimeout(() => card.addEventListener('click', resetUI), 100);
-                    }
+                    // Click card to reset
+                    const card = document.querySelector('.glass-card');
+                    const resetUI = () => {
+                        feedbackDiv.innerText = '';
+                        actionBtn.style.display = '';
+                        card.removeEventListener('click', resetUI);
+                    };
+                    setTimeout(() => card.addEventListener('click', resetUI), 100);
                 }
 
-                statusDiv.innerText = "Saved!";
+                // Reset slider
                 document.getElementById('time-offset').value = 0;
                 document.getElementById('offset-val').innerText = 0;
+                
+                // Refresh history in background (with cache busting)
+                loadHistory(); 
+
             } catch (err) {
-                statusDiv.innerText = "Error!";
+                statusDiv.innerText = "Error: " + err.message;
             } finally {
                 actionBtn.disabled = false;
             }
         }
 
         async function loadHistory() {
-            const res = await fetch('/api/history');
+            // Add timestamp to query to prevent browser caching stale data
+            const res = await fetch('/api/history?t=' + Date.now());
             const data = await res.json();
             const list = document.getElementById('history-list');
             list.innerHTML = '';
@@ -168,6 +166,7 @@
                 if (data[i].type === 'wake') {
                     const sleepEntry = data.slice(i + 1).find(entry => entry.type === 'sleep');
                     if (sleepEntry) {
+                        // Timestamps are in seconds
                         const wakeTime = new Date(data[i].timestamp * 1000);
                         const sleepTime = new Date(sleepEntry.timestamp * 1000);
                         const diffHours = (data[i].timestamp - sleepEntry.timestamp) / 3600;
