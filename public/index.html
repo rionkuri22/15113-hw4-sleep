@@ -27,6 +27,7 @@
         h1 { font-size: 2.2rem; margin-bottom: 5px; }
         #live-date { font-size: 1.1rem; opacity: 0.9; margin-bottom: 10px; font-weight: 500; }
         
+        /* Duration Text (Hidden by default) */
         #duration-feedback { font-size: 1.6rem; font-weight: 800; margin-bottom: 20px; min-height: 1.6rem; color: #1a237e; display: none; }
         
         button.btn-main { width: 100%; padding: 25px; font-size: 1.4rem; font-weight: 700; border: none; border-radius: 50px; cursor: pointer; transition: 0.2s; }
@@ -41,8 +42,10 @@
         .history-item { border-bottom: 1px solid rgba(255,255,255,0.1); padding: 15px 0; display: flex; justify-content: space-between; align-items: center; }
         .history-hours { font-weight: 800; font-size: 1.2rem; min-width: 80px; text-align: right; }
         
+        /* When in feedback mode, hide the button and show the text */
         .feedback-mode #action-btn { display: none; }
         .feedback-mode #duration-feedback { display: block; margin-top: 20px; }
+        .feedback-mode .override-section { opacity: 0; pointer-events: none; }
     </style>
 </head>
 <body class="mode-sleep">
@@ -101,16 +104,19 @@
 
         function updateUI(lastEvent) {
             currentState = lastEvent;
+            // Exit feedback mode to restore normal button
             mainView.classList.remove('feedback-mode');
             
-            // Clear status text so "Tap screen to continue" doesn't linger
+            // Clear status text
             statusDiv.innerText = "";
 
             if (lastEvent === 'sleep') {
+                // You are sleeping, show "Rise & Shine"
                 document.body.className = 'mode-wake';
                 actionBtn.innerText = "☀️ Rise & Shine";
                 actionBtn.style.display = 'block';
             } else {
+                // You are awake, show "Clocking Out"
                 document.body.className = 'mode-sleep';
                 actionBtn.innerText = "🌙 Clocking Out";
                 actionBtn.style.display = 'block';
@@ -126,6 +132,7 @@
             actionBtn.disabled = true;
 
             try {
+                // Post data
                 const res = await fetch(`/api/log?event_type=${nextType}&offset_minutes=${offset}&t=${Date.now()}`, { method: 'POST' });
                 const data = await res.json();
                 
@@ -134,32 +141,37 @@
                 statusDiv.innerText = "Saved!";
 
                 if (nextType === 'wake') {
-                    // Enter "Feedback Mode"
+                    // --- WAKE UP FLOW ---
+                    // 1. Enter Feedback Mode (Hide Button, Show Text)
                     mainView.classList.add('feedback-mode');
+                    
                     if (data.duration !== null) {
                         feedbackDiv.innerText = `You slept for ${formatDuration(data.duration)}`;
                     } else {
                         feedbackDiv.innerText = "Rise & Shine!";
                     }
-                    feedbackDiv.style.display = 'block';
-                    actionBtn.style.display = 'none';
-
-                    // Special status text only for this screen
+                    
+                    // 2. Show "Tap to continue" message only here
                     statusDiv.innerText = "Tap screen to continue";
                     
+                    // 3. Wait for tap
                     const proceedToNextState = () => {
-                        updateUI(nextType); 
+                        updateUI(nextType); // Flip to 'Clocking Out' mode
                         document.body.removeEventListener('click', proceedToNextState);
                     };
                     
+                    // Delay listener to prevent instant trigger
                     setTimeout(() => {
                         document.body.addEventListener('click', proceedToNextState);
                     }, 200);
 
                 } else {
+                    // --- SLEEP FLOW ---
+                    // Immediate switch
                     updateUI(nextType);
                 }
 
+                // Reset inputs
                 document.getElementById('time-offset').value = 0;
                 document.getElementById('offset-val').innerText = 0;
 
@@ -177,29 +189,31 @@
             const list = document.getElementById('history-list');
             list.innerHTML = '';
 
+            // 1. Sort Chronologically (Oldest -> Newest)
             const events = data.sort((a, b) => a.timestamp - b.timestamp);
             const sessions = [];
             let currentSleepStart = null;
 
+            // 2. Build Sessions strictly
             for (let ev of events) {
                 if (ev.type === 'sleep') {
-                    // Logic: Always take the FIRST sleep event if we have overlaps
-                    if (currentSleepStart === null) currentSleepStart = ev.timestamp;
+                    // Begin a sleep session (updates start time if multiple sleeps occur)
+                    currentSleepStart = ev.timestamp;
                 } else if (ev.type === 'wake') {
+                    // End sleep session if one exists
                     if (currentSleepStart !== null) {
                         const diff = (ev.timestamp - currentSleepStart) / 3600;
-                        // Removed filter so even 1-minute tests show up
-                        if (diff > 0.00) { 
-                            sessions.push({ start: currentSleepStart, end: ev.timestamp, duration: diff });
-                        }
+                        // Added to sessions list (No filtering, shows everything)
+                        sessions.push({ start: currentSleepStart, end: ev.timestamp, duration: diff });
                         currentSleepStart = null;
                     }
                 }
             }
 
             if (sessions.length === 0) {
-                list.innerHTML = "<div style='opacity:0.6; margin-top:10px'>No complete sleep sessions found.</div>";
+                list.innerHTML = "<div style='opacity:0.6; margin-top:10px'>No history yet.</div>";
             } else {
+                // 3. Display Newest -> Oldest
                 sessions.reverse().forEach(session => {
                     const sleepTime = new Date(session.start * 1000);
                     const wakeTime = new Date(session.end * 1000);

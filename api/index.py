@@ -43,46 +43,24 @@ def get_history():
 async def log_event(event_type: str, offset_minutes: int = 0):
     try:
         now_utc = datetime.now(timezone.utc)
-        # Calculate the intended timestamp
+        # Calculate the actual time based on user offset
         actual_time = now_utc - timedelta(minutes=int(offset_minutes))
         
         conn = get_db_connection()
         cur = conn.cursor()
         
-        # 1. Fetch the very last log of the same type
-        cur.execute("""
-            SELECT id, created_at FROM sleep_events 
-            WHERE event_type = %s 
-            ORDER BY created_at DESC LIMIT 1
-        """, (event_type,))
-        last_entry = cur.fetchone()
-
-        should_update = False
-        if last_entry:
-            last_id, last_time = last_entry
-            
-            # CRITICAL FIX: Compare the new actual_time with the DB last_time.
-            # If they are within 5 minutes of each other, it's a duplicate/correction.
-            # Previously this failed because it compared 'now' vs 'offset time'.
-            if last_time.tzinfo is None:
-                last_time = last_time.replace(tzinfo=timezone.utc)
-                
-            time_diff = abs((actual_time - last_time).total_seconds())
-            
-            if time_diff < 300: # 5 minutes
-                should_update = True
-                target_id = last_id
-
-        if should_update:
-            cur.execute("UPDATE sleep_events SET created_at = %s WHERE id = %s", (actual_time, target_id))
-        else:
-            cur.execute("INSERT INTO sleep_events (event_type, created_at) VALUES (%s, %s)", (event_type, actual_time))
-        
+        # ALWAYS INSERT a new row. No updating/merging.
+        # This ensures every nap/test is recorded separately.
+        cur.execute(
+            "INSERT INTO sleep_events (event_type, created_at) VALUES (%s, %s)",
+            (event_type, actual_time)
+        )
         conn.commit()
 
-        # 2. Calculate duration if waking up
+        # Calculate duration if this is a wake event
         duration_hours = None
         if event_type == "wake":
+            # Find the most recent sleep that happened BEFORE this wake time
             cur.execute("""
                 SELECT created_at FROM sleep_events 
                 WHERE event_type = 'sleep' AND created_at < %s 
