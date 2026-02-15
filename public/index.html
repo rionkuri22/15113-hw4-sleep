@@ -27,9 +27,9 @@
         h1 { font-size: 2.2rem; margin-bottom: 5px; }
         #live-date { font-size: 1.1rem; opacity: 0.9; margin-bottom: 10px; font-weight: 500; }
         
-        #duration-feedback { font-size: 1.3rem; font-weight: 800; margin-bottom: 20px; min-height: 1.6rem; color: #1a237e; }
-        body.mode-sleep #duration-feedback { display: none; } 
-
+        #duration-feedback { font-size: 1.6rem; font-weight: 800; margin-bottom: 20px; min-height: 1.6rem; color: #1a237e; display: none; }
+        /* Only show feedback when explicitly told to, or in specific states if needed */
+        
         button.btn-main { width: 100%; padding: 25px; font-size: 1.4rem; font-weight: 700; border: none; border-radius: 50px; cursor: pointer; transition: 0.2s; }
         .mode-sleep .btn-main { background: #1a237e; color: white; }
         .mode-wake .btn-main { background: white; color: #f57c00; }
@@ -41,6 +41,12 @@
         #history-view { display: none; text-align: left; max-height: 40vh; overflow-y: auto; }
         .history-item { border-bottom: 1px solid rgba(255,255,255,0.1); padding: 15px 0; display: flex; justify-content: space-between; align-items: center; }
         .history-hours { font-weight: 800; font-size: 1.2rem; min-width: 80px; text-align: right; }
+
+        .reset-btn { width: 100%; background: rgba(255, 59, 48, 0.2); border: 1px solid rgba(255, 59, 48, 0.5); color: inherit; padding: 12px; border-radius: 15px; margin-top: 20px; cursor: pointer; font-weight: 600; font-size: 0.8rem; }
+        
+        /* Helper to show text where button was */
+        .feedback-mode #action-btn { display: none; }
+        .feedback-mode #duration-feedback { display: block; margin-top: 20px; }
     </style>
 </head>
 <body class="mode-sleep">
@@ -49,8 +55,11 @@
         <div id="main-view">
             <h1>Hello, Rion</h1>
             <div id="live-date">...</div>
+            
             <div id="duration-feedback"></div>
+            
             <button id="action-btn" class="btn-main" onclick="sendLog()">...</button>
+            
             <div class="override-section">
                 <label>Forgot? <span id="offset-val">0</span> mins ago</label>
                 <input type="range" id="time-offset" min="0" max="120" value="0" oninput="document.getElementById('offset-val').innerText = this.value">
@@ -60,6 +69,7 @@
         <div id="history-view">
             <h2 style="margin:0 0 10px 0">Sleep History</h2>
             <div id="history-list">Loading...</div>
+            <button class="reset-btn" onclick="resetData()">🗑️ Reset All Data</button>
         </div>
     </div>
 
@@ -68,6 +78,7 @@
         const actionBtn = document.getElementById('action-btn');
         const feedbackDiv = document.getElementById('duration-feedback');
         const statusDiv = document.getElementById('status');
+        const mainView = document.getElementById('main-view');
 
         function updateDate() {
             const now = new Date();
@@ -84,27 +95,32 @@
         }
 
         async function toggleView() {
-            const main = document.getElementById('main-view');
             const hist = document.getElementById('history-view');
-            if (main.style.display === 'none') {
-                main.style.display = 'block'; hist.style.display = 'none';
+            if (mainView.style.display === 'none') {
+                mainView.style.display = 'block'; hist.style.display = 'none';
             } else {
-                main.style.display = 'none'; hist.style.display = 'block';
+                mainView.style.display = 'none'; hist.style.display = 'block';
                 await loadHistory();
             }
         }
 
         function updateUI(lastEvent) {
             currentState = lastEvent;
+            // Remove the temporary "feedback mode" class if it exists
+            mainView.classList.remove('feedback-mode');
+            
             if (lastEvent === 'sleep') {
+                // Currently sleeping -> Show Day Theme (Rise & Shine)
                 document.body.className = 'mode-wake';
                 actionBtn.innerText = "☀️ Rise & Shine";
+                actionBtn.style.display = 'block';
             } else {
+                // Currently awake -> Show Night Theme (Clocking Out)
                 document.body.className = 'mode-sleep';
                 actionBtn.innerText = "🌙 Clocking Out";
+                actionBtn.style.display = 'block';
             }
-            actionBtn.style.display = '';
-            feedbackDiv.innerText = '';
+            feedbackDiv.style.display = 'none';
         }
 
         async function sendLog() {
@@ -115,34 +131,41 @@
             actionBtn.disabled = true;
 
             try {
-                // Post to server with timestamp
                 const res = await fetch(`/api/log?event_type=${nextType}&offset_minutes=${offset}&t=${Date.now()}`, { method: 'POST' });
                 const data = await res.json();
+                
                 if (data.status === 'error') throw new Error(data.message);
 
-                updateUI(nextType);
                 statusDiv.innerText = "Saved!";
 
-                // If waking up, refresh history to calculate duration properly
                 if (nextType === 'wake') {
-                    // Slight delay to allow DB consistency
-                    setTimeout(async () => {
-                        await loadHistory();
-                        // Grab the top item from the history list we just rendered
-                        const topItem = document.querySelector('.history-hours');
-                        if (topItem) {
-                            feedbackDiv.innerText = `Slept ${topItem.innerText}!`;
-                            actionBtn.style.display = 'none';
-                            
-                            const card = document.querySelector('.glass-card');
-                            const resetUI = () => {
-                                feedbackDiv.innerText = '';
-                                actionBtn.style.display = '';
-                                card.removeEventListener('click', resetUI);
-                            };
-                            setTimeout(() => card.addEventListener('click', resetUI), 100);
-                        }
-                    }, 500);
+                    // --- SPECIAL LOGIC FOR WAKING UP ---
+                    // 1. Hide Button, Show Text
+                    mainView.classList.add('feedback-mode');
+                    if (data.duration !== null) {
+                        feedbackDiv.innerText = `You slept for ${formatDuration(data.duration)}`;
+                    } else {
+                        feedbackDiv.innerText = "Rise & Shine!";
+                    }
+                    feedbackDiv.style.display = 'block';
+                    actionBtn.style.display = 'none';
+
+                    // 2. Wait for user to click anywhere to continue
+                    statusDiv.innerText = "Tap screen to continue";
+                    
+                    const proceedToNextState = () => {
+                        updateUI(nextType); // This finally flips to 'Clocking Out'
+                        document.body.removeEventListener('click', proceedToNextState);
+                    };
+                    
+                    // Small timeout to prevent the current click from triggering it immediately
+                    setTimeout(() => {
+                        document.body.addEventListener('click', proceedToNextState);
+                    }, 200);
+
+                } else {
+                    // Normal behavior for going to sleep (immediate switch)
+                    updateUI(nextType);
                 }
 
                 document.getElementById('time-offset').value = 0;
@@ -150,9 +173,21 @@
 
             } catch (err) {
                 statusDiv.innerText = "Error: " + err.message;
+                // If error, revert UI safely
+                updateUI(currentState);
             } finally {
                 actionBtn.disabled = false;
             }
+        }
+
+        async function resetData() {
+            if(!confirm("Are you sure? This deletes ALL history.")) return;
+            try {
+                await fetch('/api/reset', { method: 'DELETE' });
+                await loadHistory();
+                updateUI('wake'); 
+                statusDiv.innerText = "Data wiped.";
+            } catch(e) { alert("Reset failed"); }
         }
 
         async function loadHistory() {
@@ -161,60 +196,47 @@
             const list = document.getElementById('history-list');
             list.innerHTML = '';
 
-            // 1. Sort Chronologically (Oldest to Newest) to replay the timeline
             const events = data.sort((a, b) => a.timestamp - b.timestamp);
-            
             const sessions = [];
             let currentSleepStart = null;
 
-            // 2. State Machine: Replay events to build sessions
             for (let ev of events) {
                 if (ev.type === 'sleep') {
-                    // Logic: First sleep wins. 
-                    // If we are already "asleep", ignore new sleep clicks (treat as accidental doubles)
-                    // unless the new sleep is MUCH later (e.g. 12 hours), but assuming single night for now.
-                    if (currentSleepStart === null) {
-                        currentSleepStart = ev.timestamp;
-                    }
+                    if (currentSleepStart === null) currentSleepStart = ev.timestamp;
                 } else if (ev.type === 'wake') {
                     if (currentSleepStart !== null) {
-                        // Found a pair!
                         const diff = (ev.timestamp - currentSleepStart) / 3600;
-                        if (diff > 0.05) { // Filter out < 3 min accidents
-                            sessions.push({
-                                start: currentSleepStart,
-                                end: ev.timestamp,
-                                duration: diff
-                            });
+                        if (diff > 0.02) { 
+                            sessions.push({ start: currentSleepStart, end: ev.timestamp, duration: diff });
                         }
-                        currentSleepStart = null; // Reset state to Awake
+                        currentSleepStart = null;
                     }
                 }
             }
 
-            // 3. Render sessions (Newest first)
-            sessions.reverse().forEach(session => {
-                const sleepTime = new Date(session.start * 1000);
-                const wakeTime = new Date(session.end * 1000);
-                
-                const dateLabel = sleepTime.toLocaleDateString('en-US', {month: 'short', day: 'numeric', weekday: 'short'});
+            if (sessions.length === 0) {
+                list.innerHTML = "<div style='opacity:0.6; margin-top:10px'>No complete sleep sessions found.</div>";
+            } else {
+                sessions.reverse().forEach(session => {
+                    const sleepTime = new Date(session.start * 1000);
+                    const wakeTime = new Date(session.end * 1000);
+                    const dateLabel = sleepTime.toLocaleDateString('en-US', {month: 'short', day: 'numeric', weekday: 'short'});
 
-                const item = document.createElement('div');
-                item.className = 'history-item';
-                item.innerHTML = `
-                    <div style="display:flex; flex-direction:column;">
-                        <span style="font-weight:600;">${dateLabel}</span>
-                        <span style="font-size:0.7rem; opacity:0.6;">
-                            ${sleepTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} - 
-                            ${wakeTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                        </span>
-                    </div>
-                    <span class="history-hours">${formatDuration(session.duration)}</span>
-                `;
-                list.appendChild(item);
-            });
-
-            if (sessions.length === 0) list.innerHTML = "<div style='opacity:0.6; margin-top:10px'>No complete sleep sessions yet.</div>";
+                    const item = document.createElement('div');
+                    item.className = 'history-item';
+                    item.innerHTML = `
+                        <div style="display:flex; flex-direction:column;">
+                            <span style="font-weight:600;">${dateLabel}</span>
+                            <span style="font-size:0.7rem; opacity:0.6;">
+                                ${sleepTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} - 
+                                ${wakeTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                            </span>
+                        </div>
+                        <span class="history-hours">${formatDuration(session.duration)}</span>
+                    `;
+                    list.appendChild(item);
+                });
+            }
         }
 
         window.onload = async () => {
