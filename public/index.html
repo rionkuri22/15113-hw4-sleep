@@ -112,25 +112,22 @@
             const nextType = currentState === 'sleep' ? 'wake' : 'sleep';
             
             statusDiv.innerText = "Saving...";
-            actionBtn.disabled = true;
+            actionBtn.disabled = true; // Block double clicks
 
             try {
-                // Post to server
-                const res = await fetch(`/api/log?event_type=${nextType}&offset_minutes=${offset}`, { method: 'POST' });
+                // Add timestamp to prevent caching
+                const res = await fetch(`/api/log?event_type=${nextType}&offset_minutes=${offset}&t=${Date.now()}`, { method: 'POST' });
                 const data = await res.json();
                 
                 if (data.status === 'error') throw new Error(data.message);
 
-                // Update UI based on success
                 updateUI(nextType);
                 statusDiv.innerText = "Saved!";
 
-                // If we just woke up, use the duration calculated by the server
                 if (nextType === 'wake' && data.duration !== null) {
                     feedbackDiv.innerText = `Slept ${formatDuration(data.duration)}!`;
                     actionBtn.style.display = 'none';
                     
-                    // Click card to reset
                     const card = document.querySelector('.glass-card');
                     const resetUI = () => {
                         feedbackDiv.innerText = '';
@@ -140,11 +137,8 @@
                     setTimeout(() => card.addEventListener('click', resetUI), 100);
                 }
 
-                // Reset slider
                 document.getElementById('time-offset').value = 0;
                 document.getElementById('offset-val').innerText = 0;
-                
-                // Refresh history in background (with cache busting)
                 loadHistory(); 
 
             } catch (err) {
@@ -155,7 +149,6 @@
         }
 
         async function loadHistory() {
-            // Add timestamp to query to prevent browser caching stale data
             const res = await fetch('/api/history?t=' + Date.now());
             const data = await res.json();
             const list = document.getElementById('history-list');
@@ -166,12 +159,11 @@
                 if (data[i].type === 'wake') {
                     const sleepEntry = data.slice(i + 1).find(entry => entry.type === 'sleep');
                     if (sleepEntry) {
-                        // Timestamps are in seconds
                         const wakeTime = new Date(data[i].timestamp * 1000);
                         const sleepTime = new Date(sleepEntry.timestamp * 1000);
                         const diffHours = (data[i].timestamp - sleepEntry.timestamp) / 3600;
 
-                        if (diffHours > 0.02) {
+                        if (diffHours > 0.00) {
                             const dateLabel = sleepTime.toLocaleDateString('en-US', {month: 'short', day: 'numeric', weekday: 'short'});
 
                             const item = document.createElement('div');
